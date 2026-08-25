@@ -41,7 +41,7 @@
   .headrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; position: relative; }
   .hamburger { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; cursor: pointer; }
   #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: min(320px, 88vw); max-height: 80vh; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-  #blockMenu #keysManager, #blockMenu #newsKeysManager { margin-top: 12px; margin-bottom: 0; }
+  #blockMenu #keysManager { margin-top: 12px; margin-bottom: 0; }
   #blockMenu.open { display: block; }
   #blockMenu h3 { font-size: 12px; font-weight: 500; margin: 0 0 8px 0; }
   #blockMenu .opts { display: flex; gap: 6px; }
@@ -63,11 +63,11 @@
   #setup button { width: 100%; }
   #keysManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
   #keysManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
-  #keysManager .keyrow { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
-  #keysManager .keyrow span { font-size: 11px; color: #6b7280; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #newsKeysManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
-  #newsKeysManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
-  #newsKeysManager input { flex: 1; min-width: 0; }
+  #keysManager .keyrow { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; padding: 3px 0; }
+  #keysManager .keyrow span { font-size: 10px; color: #6b7280; }
+  #keysManager .keyrow .keylabel { color: #374151; font-weight: 500; width: 62px; flex-shrink: 0; }
+  #keysManager .keyrow button { font-size: 10px; padding: 3px 6px; margin-left: auto; }
+  #keysManager input { font-size: 11px; padding: 6px 8px; }
   .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
   .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
   .newsStatus { font-size: 11px; color: #9ca3af; margin: 0; }
@@ -100,22 +100,13 @@
       <p>tile background reflects current price vs the selected average, green below average, red above, gray near it</p>
 
       <div id="keysManager">
-        <h3>api keys (<span id="keyCount">0</span> active, refresh cycle: <span id="cycleTime">-</span>)</h3>
+        <h3>api keys (<span id="keyCount">0</span>, refresh cycle: <span id="cycleTime">-</span>)</h3>
         <div id="keyList"></div>
         <div class="row" style="margin-bottom:0;">
-          <input id="addKeyInput" type="text" placeholder="add another api key">
-          <button id="addKeyBtn">add key</button>
+          <input id="addKeyInput" type="text" placeholder="paste any api key">
+          <button id="addKeyBtn">add</button>
         </div>
-      </div>
-
-      <div id="newsKeysManager">
-        <h3>news api keys</h3>
-        <div class="row" style="margin-bottom:6px;">
-          <input id="finnhubKeyInput" type="text" placeholder="finnhub api key">
-          <input id="gnewsKeyInput" type="text" placeholder="gnews api key">
-          <button id="saveNewsKeysBtn">save</button>
-        </div>
-        <p style="font-size:10px;color:#9ca3af;margin:0;">used only for the news button on the 1M tab, covers the last 30 days</p>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, finnhub, or gnews key, it gets tested and filed automatically. twelve data powers quotes and charts, finnhub and gnews power the 1M news button.</p>
       </div>
     </div>
   </div>
@@ -233,24 +224,55 @@ document.getElementById("saveKeyBtn").onclick = () => {
   boot();
 };
 
+async function detectAndAddKey(raw) {
+  if (!raw) return;
+  statusEl.textContent = "checking key...";
+
+  try {
+    const r = await fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`);
+    const d = await r.json();
+    if (d && d.symbol && !d.code) {
+      if (!keys.includes(raw)) {
+        keys.push(raw);
+        localStorage.setItem("st_keys", JSON.stringify(keys));
+      }
+      renderKeys();
+      statusEl.textContent = "added as a twelve data key";
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`);
+    const d = await r.json();
+    if (d && typeof d.c === "number" && d.c > 0) {
+      localStorage.setItem("st_finnhub_key", raw);
+      renderKeys();
+      statusEl.textContent = "added as a finnhub key";
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const r = await fetch(`https://gnews.io/api/v4/search?q=test&max=1&token=${raw}`);
+    const d = await r.json();
+    if (d && Array.isArray(d.articles)) {
+      localStorage.setItem("st_gnews_key", raw);
+      renderKeys();
+      statusEl.textContent = "added as a gnews key";
+      return;
+    }
+  } catch (e) {}
+
+  statusEl.textContent = "key not recognized by twelve data, finnhub, or gnews";
+}
+
 document.getElementById("addKeyBtn").onclick = () => {
   const input = document.getElementById("addKeyInput");
   const v = input.value.trim();
-  if (!v || keys.includes(v)) return;
-  keys.push(v);
-  localStorage.setItem("st_keys", JSON.stringify(keys));
+  if (!v) return;
   input.value = "";
-  renderKeys();
-};
-
-const finnhubInput = document.getElementById("finnhubKeyInput");
-const gnewsInput = document.getElementById("gnewsKeyInput");
-finnhubInput.value = localStorage.getItem("st_finnhub_key") || "";
-gnewsInput.value = localStorage.getItem("st_gnews_key") || "";
-document.getElementById("saveNewsKeysBtn").onclick = () => {
-  localStorage.setItem("st_finnhub_key", finnhubInput.value.trim());
-  localStorage.setItem("st_gnews_key", gnewsInput.value.trim());
-  statusEl.textContent = "news keys saved";
+  detectAndAddKey(v);
 };
 
 document.getElementById("addBtn").onclick = () => {
@@ -269,20 +291,53 @@ function removeKey(k) {
   localStorage.setItem("st_keys", JSON.stringify(keys));
   renderKeys();
 }
+function removeFinnhubKey() {
+  localStorage.removeItem("st_finnhub_key");
+  renderKeys();
+}
+function removeGnewsKey() {
+  localStorage.removeItem("st_gnews_key");
+  renderKeys();
+}
+
+function maskKey(k) {
+  return k.length > 4 ? "••••" + k.slice(-4) : "••••";
+}
 
 function renderKeys() {
   keyListEl.innerHTML = "";
   keys.forEach(k => {
     const row = document.createElement("div");
     row.className = "keyrow";
-    const masked = k.length > 8 ? k.slice(0, 4) + "..." + k.slice(-4) : k;
-    row.innerHTML = `<span>${masked}</span>`;
+    row.innerHTML = `<span class="keylabel">twelve data</span><span>${maskKey(k)}</span>`;
     const rm = document.createElement("button");
     rm.textContent = "remove";
     rm.onclick = () => removeKey(k);
     row.appendChild(rm);
     keyListEl.appendChild(row);
   });
+  const fh = localStorage.getItem("st_finnhub_key");
+  if (fh) {
+    const row = document.createElement("div");
+    row.className = "keyrow";
+    row.innerHTML = `<span class="keylabel">finnhub</span><span>${maskKey(fh)}</span>`;
+    const rm = document.createElement("button");
+    rm.textContent = "remove";
+    rm.onclick = removeFinnhubKey;
+    row.appendChild(rm);
+    keyListEl.appendChild(row);
+  }
+  const gn = localStorage.getItem("st_gnews_key");
+  if (gn) {
+    const row = document.createElement("div");
+    row.className = "keyrow";
+    row.innerHTML = `<span class="keylabel">gnews</span><span>${maskKey(gn)}</span>`;
+    const rm = document.createElement("button");
+    rm.textContent = "remove";
+    rm.onclick = removeGnewsKey;
+    row.appendChild(rm);
+    keyListEl.appendChild(row);
+  }
   keyCountEl.textContent = keys.length;
   const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : "-";
   cycleTimeEl.textContent = cycleSec + "s";
