@@ -547,6 +547,8 @@ function isHistoryFresh(symbol, uiRange) {
 const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG: "Chipotle", WEN: "Wendy's", JACK: "Jack in the Box", DPZ: "Domino's", PZZA: "Papa John's", QSR: "Restaurant Brands International", WING: "Wingstop", SHAK: "Shake Shack", CAVA: "Cava", PTLO: "Portillo's", BROS: "Dutch Bros", DNUT: "Krispy Kreme", DENN: "Denny's", PBPB: "Potbelly", CHUY: "Chuy's", SG: "Sweetgreen", KRUS: "Kura Sushi", FAT: "FAT Brands", BFI: "BurgerFi", GTIM: "Good Times Restaurants", TAST: "Carrols Restaurant Group", LOCO: "El Pollo Loco", ARCO: "Arcos Dorados", NATH: "Nathan's Famous", FRGI: "Fiesta Restaurant Group", NDLS: "Noodles & Company", YUMC: "Yum China" };
 
 const FDA_RECALL_NAMES = { MCD: "mcdonald's", SBUX: "starbucks", YUM: "yum", CMG: "chipotle", WEN: "wendy's", JACK: "jack in the box", DPZ: "domino's", PZZA: "papa john's", QSR: "burger king", WING: "wingstop", SHAK: "shake shack", CAVA: "cava", PTLO: "portillo's", BROS: "dutch bros", DNUT: "krispy kreme", DENN: "denny's", PBPB: "potbelly", CHUY: "chuy's", SG: "sweetgreen", KRUS: "kura sushi", FAT: "fatburger", BFI: "burgerfi", GTIM: "good times", TAST: "burger king", LOCO: "el pollo loco", ARCO: "mcdonald's", NATH: "nathan's", FRGI: "pollo tropical", NDLS: "noodles" };
+
+const INGREDIENT_KEYWORDS = { MCD: "beef", SBUX: "coffee", YUM: "chicken", CMG: "lettuce", WEN: "beef", JACK: "beef", DPZ: "cheese", PZZA: "cheese", QSR: "chicken", WING: "chicken", SHAK: "beef", CAVA: "lettuce", PTLO: "beef", BROS: "coffee", DNUT: "flour", DENN: "eggs", PBPB: "turkey", CHUY: "chicken", SG: "lettuce", KRUS: "rice", FAT: "beef", BFI: "beef", GTIM: "beef", TAST: "beef", LOCO: "chicken", ARCO: "beef", NATH: "beef", FRGI: "chicken", NDLS: "pasta" };
 let recallsCache = JSON.parse(localStorage.getItem("st_recalls_cache") || "null") || {};
 const RECALL_TTL_MS = 24 * 60 * 60000;
 
@@ -564,26 +566,46 @@ function parseFDADate(d) {
 }
 
 async function fetchRecalls(symbol) {
-  const term = FDA_RECALL_NAMES[symbol];
-  if (!term) {
-    statusEl.textContent = "no FDA search term set for " + symbol;
+  const brandTerm = FDA_RECALL_NAMES[symbol];
+  const ingredientTerm = INGREDIENT_KEYWORDS[symbol];
+  if (!brandTerm && !ingredientTerm) {
+    statusEl.textContent = "no FDA search terms set for " + symbol;
     return;
   }
   statusEl.textContent = "checking FDA recalls for " + symbol;
+  const mapResult = (r, matchedBy) => ({
+    timestamp: Math.floor(parseFDADate(r.report_date) / 1000),
+    reason: r.reason_for_recall,
+    product: r.product_description,
+    classification: r.classification,
+    recallingFirm: r.recalling_firm,
+    matchedBy: matchedBy
+  });
   try {
-    const url = "https://api.fda.gov/food/enforcement.json?search=recalling_firm:\"" + encodeURIComponent(term) + "\"&sort=report_date:desc&limit=50";
-    const res = await fetch(url);
-    const data = await res.json();
-    const results = (data.results || []).map(r => ({
-      timestamp: Math.floor(parseFDADate(r.report_date) / 1000),
-      reason: r.reason_for_recall,
-      product: r.product_description,
-      classification: r.classification,
-      recallingFirm: r.recalling_firm
-    }));
-    recallsCache[symbol] = { recalls: results, fetchedAt: Date.now() };
+    const requests = [];
+    if (brandTerm) {
+      const brandUrl = "https://api.fda.gov/food/enforcement.json?search=recalling_firm:\"" + encodeURIComponent(brandTerm) + "\"&sort=report_date:desc&limit=50";
+      requests.push(fetch(brandUrl).then(r => r.json()).then(d => (d.results || []).map(r => mapResult(r, "brand"))).catch(() => []));
+    }
+    if (ingredientTerm) {
+      const ingUrl = "https://api.fda.gov/food/enforcement.json?search=product_description:\"" + encodeURIComponent(ingredientTerm) + "\"&sort=report_date:desc&limit=50";
+      requests.push(fetch(ingUrl).then(r => r.json()).then(d => (d.results || []).map(r => mapResult(r, "supplier"))).catch(() => []));
+    }
+    const resultSets = await Promise.all(requests);
+    const seen = new Set();
+    const merged = [];
+    resultSets.forEach(set => {
+      set.forEach(r => {
+        const key = r.timestamp + "|" + r.recallingFirm + "|" + r.product;
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(r);
+      });
+    });
+    merged.sort((a, b) => b.timestamp - a.timestamp);
+    recallsCache[symbol] = { recalls: merged, fetchedAt: Date.now() };
     saveRecallsCache();
-    statusEl.textContent = results.length + " FDA recall record" + (results.length === 1 ? "" : "s") + " found";
+    statusEl.textContent = merged.length + " FDA recall record" + (merged.length === 1 ? "" : "s") + " found";
   } catch (e) {
     statusEl.textContent = "FDA recall lookup failed";
   }
@@ -952,7 +974,8 @@ function render() {
         } else {
           inner += `<div class="newsPanel">` + rc.recalls.map(r => {
             const d = new Date(r.timestamp * 1000).toISOString().slice(0, 10);
-            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${r.classification} &middot; ${r.recallingFirm}</div><div class="newsHeadline">${r.product || ""}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${r.reason || ""}</div></div>`;
+            const tag = r.matchedBy === "brand" ? '<span style="color:#7c3aed;">direct brand match</span>' : `<span style="color:#9ca3af;">supplier match on ${INGREDIENT_KEYWORDS[sym]}, not confirmed tied to ${FDA_RECALL_NAMES[sym] || sym}</span>`;
+            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${r.classification} &middot; ${r.recallingFirm} &middot; ${tag}</div><div class="newsHeadline">${r.product || ""}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${r.reason || ""}</div></div>`;
           }).join("") + `</div>`;
         }
       }
