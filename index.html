@@ -40,7 +40,8 @@
   .srclabel { font-size: 10px; color: #9ca3af; margin-left: 4px; }
   .headrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; position: relative; }
   .hamburger { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; cursor: pointer; }
-  #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: 220px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: min(320px, 88vw); max-height: 80vh; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  #blockMenu #keysManager, #blockMenu #newsKeysManager { margin-top: 12px; margin-bottom: 0; }
   #blockMenu.open { display: block; }
   #blockMenu h3 { font-size: 12px; font-weight: 500; margin: 0 0 8px 0; }
   #blockMenu .opts { display: flex; gap: 6px; }
@@ -97,26 +98,26 @@
         <button data-period="1Y">year</button>
       </div>
       <p>tile background reflects current price vs the selected average, green below average, red above, gray near it</p>
-    </div>
-  </div>
 
-  <div id="keysManager">
-    <h3>api keys (<span id="keyCount">0</span> active, refresh cycle: <span id="cycleTime">-</span>)</h3>
-    <div id="keyList"></div>
-    <div class="row" style="margin-bottom:0;">
-      <input id="addKeyInput" type="text" placeholder="add another api key">
-      <button id="addKeyBtn">add key</button>
-    </div>
-  </div>
+      <div id="keysManager">
+        <h3>api keys (<span id="keyCount">0</span> active, refresh cycle: <span id="cycleTime">-</span>)</h3>
+        <div id="keyList"></div>
+        <div class="row" style="margin-bottom:0;">
+          <input id="addKeyInput" type="text" placeholder="add another api key">
+          <button id="addKeyBtn">add key</button>
+        </div>
+      </div>
 
-  <div id="newsKeysManager">
-    <h3>news api keys</h3>
-    <div class="row" style="margin-bottom:6px;">
-      <input id="finnhubKeyInput" type="text" placeholder="finnhub api key">
-      <input id="gnewsKeyInput" type="text" placeholder="gnews api key">
-      <button id="saveNewsKeysBtn">save</button>
+      <div id="newsKeysManager">
+        <h3>news api keys</h3>
+        <div class="row" style="margin-bottom:6px;">
+          <input id="finnhubKeyInput" type="text" placeholder="finnhub api key">
+          <input id="gnewsKeyInput" type="text" placeholder="gnews api key">
+          <button id="saveNewsKeysBtn">save</button>
+        </div>
+        <p style="font-size:10px;color:#9ca3af;margin:0;">used only for the news button on the 1M tab, covers the last 30 days</p>
+      </div>
     </div>
-    <p style="font-size:10px;color:#9ca3af;margin:0;">used only for the news button on the 1M tab, covers the last 30 days</p>
   </div>
 
   <div class="row">
