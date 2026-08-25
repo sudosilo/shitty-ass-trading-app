@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qsr tracker</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #ffffff; color: #111827; }
+  .wrap { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 12px 0; }
+  .row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  input, textarea { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  button { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 12px; font-size: 13px; background: #fff; cursor: pointer; color: #374151; }
+  button:hover { background: #f9fafb; }
+  button.primary { background: #111827; color: #fff; border-color: #111827; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; cursor: pointer; position: relative; }
+  .card.selected { border-color: #111827; grid-column: 1 / -1; cursor: default; }
+  .card .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .card .sym { font-weight: 500; font-size: 13px; }
+  .card .rm { font-size: 11px; color: #d1d5db; background: none; border: none; padding: 0; }
+  .card .rm:hover { color: #6b7280; }
+  .card .price { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  .card .change { font-size: 11px; }
+  .card .change.up { color: #16a34a; }
+  .card .change.down { color: #dc2626; }
+  .card .updated { font-size: 10px; color: #9ca3af; margin-top: 4px; }
+  .card .waiting { font-size: 11px; color: #9ca3af; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 20px); grid-template-rows: repeat(2, 18px); gap: 2px; margin-top: 8px; justify-content: start; }
+  .dpad .dp { grid-row: auto; padding: 0; font-size: 9px; line-height: 1; color: #9ca3af; border-color: #e5e7eb; }
+  .dpad .dp[data-dir="up"] { grid-column: 2; grid-row: 1; }
+  .dpad .dp[data-dir="left"] { grid-column: 1; grid-row: 2; }
+  .dpad .dp[data-dir="right"] { grid-column: 3; grid-row: 2; }
+  .dpad .dp[data-dir="down"] { grid-column: 2; grid-row: 2; }
+  .dpad .dp:hover { color: #374151; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 5px; vertical-align: middle; }
+  .dot.live { background: #16a34a; }
+  .dot.cache { background: transparent; border: 1px solid #9ca3af; }
+  .srclabel { font-size: 10px; color: #9ca3af; margin-left: 4px; }
+  .headrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; position: relative; }
+  .hamburger { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; cursor: pointer; }
+  #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: 220px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  #blockMenu.open { display: block; }
+  #blockMenu h3 { font-size: 12px; font-weight: 500; margin: 0 0 8px 0; }
+  #blockMenu .opts { display: flex; gap: 6px; }
+  #blockMenu .opts button { flex: 1; font-size: 12px; padding: 6px 0; }
+  #blockMenu .opts button.active { border-color: #111827; color: #111827; }
+  #blockMenu p { font-size: 10px; color: #9ca3af; margin: 8px 0 0 0; }
+  .card .expandHead { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; margin-bottom: 8px; }
+  .expandHead { flex-wrap: wrap; }
+  .ranges { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ranges button { font-size: 11px; padding: 4px 8px; margin-left: 0; }
+  .ranges button.active { border-color: #111827; color: #111827; }
+  canvas { width: 100%; height: 220px; display: block; }
+  .status { font-size: 11px; color: #9ca3af; }
+  .foot { font-size: 11px; color: #9ca3af; margin-top: 10px; }
+  #setup { max-width: 420px; margin: 40px auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; }
+  #setup p { font-size: 13px; color: #4b5563; }
+  #setup input, #setup textarea { width: 100%; margin-bottom: 10px; }
+  #setup textarea { height: 90px; }
+  #setup button { width: 100%; }
+  #keysManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
+  #keysManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
+  #keysManager .keyrow { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  #keysManager .keyrow span { font-size: 11px; color: #6b7280; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #newsKeysManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
+  #newsKeysManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
+  #newsKeysManager input { flex: 1; min-width: 0; }
+  .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
+  .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+  .newsStatus { font-size: 11px; color: #9ca3af; margin: 0; }
+  .newsItem { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+  .newsDate { font-size: 10px; color: #9ca3af; }
+  .newsHeadline { font-size: 12px; color: #111827; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>stock tracker setup</h1>
+  <p>enter one or more free twelve data api keys, one per line. each key gets its own 8 requests per minute allowance, more keys means faster refresh across your ticker list.</p>
+  <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
+  <button class="primary" id="saveKeyBtn">save keys and continue</button>
+  <p style="font-size:11px;color:#9ca3af;">sign up at twelvedata.com, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
+</div>
+
+<div class="wrap" id="app" style="display:none;">
+  <div class="headrow">
+    <button class="hamburger" id="hamburgerBtn">&#9776;</button>
+    <h1 style="margin:0;">qsr tracker</h1>
+    <div id="blockMenu">
+      <h3>block color average</h3>
+      <div class="opts">
+        <button data-period="1W">week</button>
+        <button data-period="1M">month</button>
+        <button data-period="1Y">year</button>
+      </div>
+      <p>tile background reflects current price vs the selected average, green below average, red above, gray near it</p>
+    </div>
+  </div>
+
+  <div id="keysManager">
+    <h3>api keys (<span id="keyCount">0</span> active, refresh cycle: <span id="cycleTime">-</span>)</h3>
+    <div id="keyList"></div>
+    <div class="row" style="margin-bottom:0;">
+      <input id="addKeyInput" type="text" placeholder="add another api key">
+      <button id="addKeyBtn">add key</button>
+    </div>
+  </div>
+
+  <div id="newsKeysManager">
+    <h3>news api keys</h3>
+    <div class="row" style="margin-bottom:6px;">
+      <input id="finnhubKeyInput" type="text" placeholder="finnhub api key">
+      <input id="gnewsKeyInput" type="text" placeholder="gnews api key">
+      <button id="saveNewsKeysBtn">save</button>
+    </div>
+    <p style="font-size:10px;color:#9ca3af;margin:0;">used only for the news button on the 1M tab, covers the last 30 days</p>
+  </div>
+
+  <div class="row">
+    <input id="newTicker" type="text" placeholder="add ticker symbol">
+    <button id="addBtn">add</button>
+    <span class="status" id="status"></span>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const DEFAULT_TICKERS = ["MCD","YUM","SBUX","CMG","QSR","WEN","DPZ","JACK","PZZA","SHAK","WING","LOCO","ARCO","BROS","PTLO","NATH","CAVA","FRGI","NDLS","YUMC"];
+const TICKER_SET_VERSION = "qsr1";
+const KEY_COOLDOWN_MS = 7600;
+const QUOTE_TTL_MS = 45000;
+const HISTORY_TTL_MS = { "1D": 5 * 60000, "1W": 60 * 60000, "DAILY": 24 * 60 * 60000 };
+
+let keys = JSON.parse(localStorage.getItem("st_keys") || "null") || [];
+const needsMigration = localStorage.getItem("st_ticker_version") !== TICKER_SET_VERSION;
+let tickers = JSON.parse(localStorage.getItem("st_tickers") || "null") || DEFAULT_TICKERS.slice();
+let quotes = JSON.parse(localStorage.getItem("st_quote_cache") || "null") || {};
+let history = JSON.parse(localStorage.getItem("st_history_cache") || "null") || {};
+if (needsMigration) {
+  tickers = DEFAULT_TICKERS.slice();
+  quotes = {};
+  history = {};
+  localStorage.setItem("st_tickers", JSON.stringify(tickers));
+  localStorage.setItem("st_quote_cache", JSON.stringify(quotes));
+  localStorage.setItem("st_history_cache", JSON.stringify(history));
+  localStorage.setItem("st_ticker_version", TICKER_SET_VERSION);
+}
+Object.values(quotes).forEach(q => { q.source = "cache"; });
+Object.values(history).forEach(h => { h.source = "cache"; });
+let selected = null;
+let selectedRange = "3M";
+let blockPeriod = localStorage.getItem("st_block_period") || "1W";
+let queue = [];
+let keyCooldowns = {};
+let showNews = false;
+let newsCache = JSON.parse(localStorage.getItem("st_news_cache") || "null") || {};
+const NEWS_TTL_MS = 30 * 60000;
+
+function saveQuoteCache() {
+  try { localStorage.setItem("st_quote_cache", JSON.stringify(quotes)); } catch (e) {}
+}
+function saveHistoryCache() {
+  try { localStorage.setItem("st_history_cache", JSON.stringify(history)); } catch (e) {}
+}
+function saveNewsCache() {
+  try { localStorage.setItem("st_news_cache", JSON.stringify(newsCache)); } catch (e) {}
+}
+
+const setupEl = document.getElementById("setup");
+const appEl = document.getElementById("app");
+const gridEl = document.getElementById("grid");
+const statusEl = document.getElementById("status");
+const footEl = document.getElementById("foot");
+const keyListEl = document.getElementById("keyList");
+const keyCountEl = document.getElementById("keyCount");
+const cycleTimeEl = document.getElementById("cycleTime");
+const hamburgerBtn = document.getElementById("hamburgerBtn");
+const blockMenuEl = document.getElementById("blockMenu");
+
+hamburgerBtn.onclick = (e) => {
+  e.stopPropagation();
+  blockMenuEl.classList.toggle("open");
+};
+document.addEventListener("click", (e) => {
+  if (blockMenuEl.classList.contains("open") && !blockMenuEl.contains(e.target) && e.target !== hamburgerBtn) {
+    blockMenuEl.classList.remove("open");
+  }
+});
+document.querySelectorAll("#blockMenu .opts button").forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    blockPeriod = btn.dataset.period;
+    localStorage.setItem("st_block_period", blockPeriod);
+    updateBlockMenuButtons();
+    refreshBlockColors();
+    render();
+  };
+});
+function updateBlockMenuButtons() {
+  document.querySelectorAll("#blockMenu .opts button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.period === blockPeriod);
+  });
+}
+function refreshBlockColors() {
+  tickers.forEach(sym => {
+    if (!isHistoryFresh(sym, blockPeriod)) {
+      enqueue({ type: "history", symbol: sym, run: (k) => fetchHistory(sym, blockPeriod, k) });
+    }
+  });
+}
+function blockColorFor(sym) {
+  const q = quotes[sym];
+  const points = getPointsForRange(sym, blockPeriod);
+  if (!q || !points || points.length === 0) return null;
+  const avg = points.reduce((a, p) => a + p.close, 0) / points.length;
+  const diffPct = (q.price - avg) / avg;
+  if (diffPct <= -0.005) return "green";
+  if (diffPct >= 0.005) return "red";
+  return "gray";
+}
+
+document.getElementById("saveKeyBtn").onclick = () => {
+  const raw = document.getElementById("keyInput").value;
+  const parsed = raw.split(/[\n,]/).map(k => k.trim()).filter(Boolean);
+  if (parsed.length === 0) return;
+  keys = parsed;
+  localStorage.setItem("st_keys", JSON.stringify(keys));
+  boot();
+};
+
+document.getElementById("addKeyBtn").onclick = () => {
+  const input = document.getElementById("addKeyInput");
+  const v = input.value.trim();
+  if (!v || keys.includes(v)) return;
+  keys.push(v);
+  localStorage.setItem("st_keys", JSON.stringify(keys));
+  input.value = "";
+  renderKeys();
+};
+
+const finnhubInput = document.getElementById("finnhubKeyInput");
+const gnewsInput = document.getElementById("gnewsKeyInput");
+finnhubInput.value = localStorage.getItem("st_finnhub_key") || "";
+gnewsInput.value = localStorage.getItem("st_gnews_key") || "";
+document.getElementById("saveNewsKeysBtn").onclick = () => {
+  localStorage.setItem("st_finnhub_key", finnhubInput.value.trim());
+  localStorage.setItem("st_gnews_key", gnewsInput.value.trim());
+  statusEl.textContent = "news keys saved";
+};
+
+document.getElementById("addBtn").onclick = () => {
+  const input = document.getElementById("newTicker");
+  const sym = input.value.trim().toUpperCase();
+  if (!sym || tickers.includes(sym)) return;
+  tickers.push(sym);
+  localStorage.setItem("st_tickers", JSON.stringify(tickers));
+  input.value = "";
+  render();
+  enqueue({ type: "quote", symbol: sym, run: (key) => fetchQuote(sym, key) });
+};
+
+function removeKey(k) {
+  keys = keys.filter(x => x !== k);
+  localStorage.setItem("st_keys", JSON.stringify(keys));
+  renderKeys();
+}
+
+function renderKeys() {
+  keyListEl.innerHTML = "";
+  keys.forEach(k => {
+    const row = document.createElement("div");
+    row.className = "keyrow";
+    const masked = k.length > 8 ? k.slice(0, 4) + "..." + k.slice(-4) : k;
+    row.innerHTML = `<span>${masked}</span>`;
+    const rm = document.createElement("button");
+    rm.textContent = "remove";
+    rm.onclick = () => removeKey(k);
+    row.appendChild(rm);
+    keyListEl.appendChild(row);
+  });
+  keyCountEl.textContent = keys.length;
+  const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : "-";
+  cycleTimeEl.textContent = cycleSec + "s";
+}
+
+function enqueue(job) {
+  queue.push(job);
+}
+
+function keyAvailable(k) {
+  const last = keyCooldowns[k] || 0;
+  return Date.now() - last >= KEY_COOLDOWN_MS;
+}
+
+setInterval(() => {
+  if (queue.length === 0 || keys.length === 0) return;
+  for (const k of keys) {
+    if (queue.length === 0) break;
+    if (!keyAvailable(k)) continue;
+    let idx;
+    if (selected) {
+      idx = queue.findIndex(j => j.type === "history" && j.symbol === selected);
+    } else {
+      idx = 0;
+    }
+    if (idx === -1) continue;
+    const job = queue.splice(idx, 1)[0];
+    keyCooldowns[k] = Date.now();
+    Promise.resolve(job.run(k)).catch(() => {});
+  }
+}, 500);
+
+async function fetchQuote(symbol, key) {
+  try {
+    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${symbol}&apikey=${key}`);
+    const data = await res.json();
+    if (data.status === "error" || data.code) {
+      statusEl.textContent = symbol + ": " + (data.message || "error");
+      return;
+    }
+    quotes[symbol] = {
+      price: parseFloat(data.close),
+      change: parseFloat(data.change),
+      percent: parseFloat(data.percent_change),
+      updated: new Date().toLocaleTimeString(),
+      fetchedAt: Date.now(),
+      source: "live"
+    };
+    saveQuoteCache();
+    statusEl.textContent = "";
+    render();
+  } catch (e) {
+    statusEl.textContent = symbol + ": request failed";
+  }
+}
+
+const API_RANGE_MAP = { "1D": { interval: "5min", size: 80 }, "1W": { interval: "1h", size: 40 }, "DAILY": { interval: "1day", size: 260 } };
+
+function apiRangeFor(uiRange) {
+  return (uiRange === "1M" || uiRange === "3M" || uiRange === "1Y") ? "DAILY" : uiRange;
+}
+function cacheKeyFor(symbol, uiRange) {
+  return symbol + "_" + apiRangeFor(uiRange);
+}
+function sliceForRange(points, uiRange) {
+  if (uiRange === "1M") return points.slice(-22);
+  if (uiRange === "3M") return points.slice(-66);
+  return points;
+}
+function getPointsForRange(symbol, uiRange) {
+  const h = history[cacheKeyFor(symbol, uiRange)];
+  if (!h) return null;
+  return sliceForRange(h.points, uiRange);
+}
+
+async function fetchHistory(symbol, uiRange, key) {
+  const apiRange = apiRangeFor(uiRange);
+  const cfg = API_RANGE_MAP[apiRange];
+  try {
+    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${cfg.interval}&outputsize=${cfg.size}&apikey=${key}`);
+    const data = await res.json();
+    if (data.status === "error" || !data.values) {
+      statusEl.textContent = symbol + " history: " + (data.message || "error");
+      return;
+    }
+    const points = data.values.map(v => ({ date: v.datetime, close: parseFloat(v.close) })).reverse();
+    history[symbol + "_" + apiRange] = { points: points, fetchedAt: Date.now(), source: "live" };
+    saveHistoryCache();
+    if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+      render();
+    }
+  } catch (e) {
+    statusEl.textContent = symbol + " history: request failed";
+  }
+}
+
+function isHistoryFresh(symbol, uiRange) {
+  const h = history[cacheKeyFor(symbol, uiRange)];
+  if (!h) return false;
+  return Date.now() - h.fetchedAt < HISTORY_TTL_MS[apiRangeFor(uiRange)];
+}
+
+const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG: "Chipotle", WEN: "Wendy's", JACK: "Jack in the Box", DPZ: "Domino's", PZZA: "Papa John's", QSR: "Restaurant Brands International", WING: "Wingstop", SHAK: "Shake Shack", CAVA: "Cava", PTLO: "Portillo's", BROS: "Dutch Bros" };
+
+function isNewsFresh(symbol) {
+  const n = newsCache[symbol];
+  return n && Date.now() - n.fetchedAt < NEWS_TTL_MS;
+}
+
+async function fetchNews(symbol) {
+  const finnhubKey = localStorage.getItem("st_finnhub_key");
+  const gnewsKey = localStorage.getItem("st_gnews_key");
+  if (!finnhubKey && !gnewsKey) {
+    statusEl.textContent = "add a finnhub or gnews key to load news";
+    return;
+  }
+  statusEl.textContent = "loading news for " + symbol;
+  const today = new Date();
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  const toStr = today.toISOString().slice(0, 10);
+  const fromStr = thirtyDaysAgo.toISOString().slice(0, 10);
+  const companyName = QSR_NAMES[symbol] || symbol;
+  const requests = [];
+
+  if (finnhubKey) {
+    const finnhubUrl = "https://finnhub.io/api/v1/company-news?symbol=" + symbol + "&from=" + fromStr + "&to=" + toStr + "&token=" + finnhubKey;
+    requests.push(
+      fetch(finnhubUrl).then(r => r.json()).then(data => {
+        if (!Array.isArray(data)) return [];
+        return data.map(item => ({ timestamp: item.datetime, headline: item.headline, source: item.source, url: item.url, origin: "Finnhub" }));
+      }).catch(() => [])
+    );
+  }
+  if (gnewsKey) {
+    const gnewsUrl = "https://gnews.io/api/v4/search?q=%22" + encodeURIComponent(companyName) + "%22&from=" + thirtyDaysAgo.toISOString() + "&lang=en&country=us&max=50&token=" + gnewsKey;
+    requests.push(
+      fetch(gnewsUrl).then(r => r.json()).then(data => {
+        if (!data.articles) return [];
+        return data.articles.map(item => ({ timestamp: Math.floor(new Date(item.publishedAt).getTime() / 1000), headline: item.title, source: (item.source && item.source.name) || "unknown", url: item.url, origin: "GNews" }));
+      }).catch(() => [])
+    );
+  }
+
+  const resultsArrays = await Promise.all(requests);
+  let combined = [];
+  resultsArrays.forEach(arr => { combined = combined.concat(arr); });
+  combined.sort((a, b) => b.timestamp - a.timestamp);
+  newsCache[symbol] = { articles: combined, fetchedAt: Date.now() };
+  saveNewsCache();
+  statusEl.textContent = combined.length + " articles found";
+  render();
+}
+
+function toggleNews() {
+  showNews = !showNews;
+  if (showNews && !isNewsFresh(selected)) {
+    fetchNews(selected);
+  } else {
+    render();
+  }
+}
+
+function newsMarkersFor(symbol, points) {
+  const n = newsCache[symbol];
+  if (!n || !points || points.length === 0) return [];
+  const markers = [];
+  n.articles.forEach(a => {
+    const artDate = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
+    let bestIdx = -1, bestDiff = Infinity;
+    points.forEach((p, i) => {
+      const diff = Math.abs(new Date(p.date.slice(0, 10)).getTime() - new Date(artDate).getTime());
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx !== -1 && bestDiff <= 2 * 24 * 60 * 60000) markers.push(bestIdx);
+  });
+  return [...new Set(markers)];
+}
+
+function openHistory(symbol) {
+  if (selected === symbol) return;
+  selected = symbol;
+  selectedRange = "3M";
+  showNews = false;
+  render();
+  if (!isHistoryFresh(symbol, "3M")) {
+    enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
+  }
+}
+
+function closeHistory() {
+  selected = null;
+  showNews = false;
+  queue = queue.filter(j => j.type !== "quote");
+  render();
+}
+
+function changeRange(range) {
+  selectedRange = range;
+  if (range !== "1M") showNews = false;
+  render();
+  if (!isHistoryFresh(selected, range)) {
+    enqueue({ type: "history", symbol: selected, run: (k) => fetchHistory(selected, range, k) });
+  }
+}
+
+function gridColumnCount() {
+  const gridWidth = gridEl.clientWidth || 1000;
+  const colWidth = 140, gap = 10;
+  return Math.max(1, Math.floor((gridWidth + gap) / (colWidth + gap)));
+}
+
+function moveTicker(sym, dir) {
+  const idx = tickers.indexOf(sym);
+  if (idx === -1) return;
+  const cols = gridColumnCount();
+  let delta = 0;
+  if (dir === "left") delta = -1;
+  else if (dir === "right") delta = 1;
+  else if (dir === "up") delta = -cols;
+  else if (dir === "down") delta = cols;
+  let newIdx = idx + delta;
+  newIdx = Math.max(0, Math.min(tickers.length - 1, newIdx));
+  if (newIdx === idx) return;
+  tickers.splice(idx, 1);
+  tickers.splice(newIdx, 0, sym);
+  localStorage.setItem("st_tickers", JSON.stringify(tickers));
+  render();
+}
+
+function removeTicker(sym) {
+  tickers = tickers.filter(t => t !== sym);
+  localStorage.setItem("st_tickers", JSON.stringify(tickers));
+  if (selected === sym) selected = null;
+  render();
+  renderKeys();
+}
+
+function drawChart(points, markers) {
+  const canvas = document.getElementById("chart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height, pad = 30;
+  ctx.clearRect(0, 0, w, h);
+  if (!points || points.length === 0) return;
+  const closes = points.map(p => p.close);
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const avg = closes.reduce((a, b) => a + b, 0) / closes.length;
+  const range = max - min || 1;
+  const yFor = (val) => pad + (h - 2 * pad) * (1 - (val - min) / range);
+
+  ctx.strokeStyle = "#e5e7eb";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad + (h - 2 * pad) * (i / 4);
+    ctx.beginPath();
+    ctx.moveTo(pad, y);
+    ctx.lineTo(w - pad, y);
+    ctx.stroke();
+  }
+
+  const refLines = [
+    { val: max, color: "#dc2626", label: "high " + max.toFixed(2) },
+    { val: min, color: "#2563eb", label: "low " + min.toFixed(2) },
+    { val: avg, color: "#16a34a", label: "avg " + avg.toFixed(2) }
+  ];
+  refLines.forEach(r => {
+    const y = yFor(r.val);
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(pad, y);
+    ctx.lineTo(w - pad, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = r.color;
+    ctx.font = "10px sans-serif";
+    ctx.fillText(r.label, w - pad - 70, y - 3);
+  });
+
+  ctx.lineWidth = 1.5;
+  const steps = [];
+  for (let i = 1; i < points.length; i++) steps.push(points[i].close - points[i - 1].close);
+  const maxAbsStep = Math.max(...steps.map(s => Math.abs(s)), 0.0001);
+
+  function segColor(step) {
+    const intensity = Math.min(Math.abs(step) / maxAbsStep, 1);
+    if (Math.abs(step) < 0.0001) return "#111827";
+    const base = [17, 24, 39];
+    const target = step > 0 ? [22, 163, 74] : [220, 38, 38];
+    const rgb = base.map((c, i) => Math.round(c + (target[i] - c) * intensity));
+    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  }
+
+  for (let i = 1; i < points.length; i++) {
+    const x1 = pad + (w - 2 * pad) * ((i - 1) / (points.length - 1 || 1));
+    const y1 = yFor(points[i - 1].close);
+    const x2 = pad + (w - 2 * pad) * (i / (points.length - 1 || 1));
+    const y2 = yFor(points[i].close);
+    ctx.strokeStyle = segColor(points[i].close - points[i - 1].close);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "10px sans-serif";
+  ctx.fillText(points[0].date, pad, h - 6);
+  ctx.fillText(points[points.length - 1].date, w - pad - 60, h - 6);
+
+  if (markers && markers.length > 0) {
+    ctx.fillStyle = "#7c3aed";
+    markers.forEach(i => {
+      const x = pad + (w - 2 * pad) * (i / (points.length - 1 || 1));
+      const y = yFor(points[i].close);
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+}
+
+function render() {
+  gridEl.innerHTML = "";
+  tickers.forEach(sym => {
+    const q = quotes[sym];
+    const isSelected = selected === sym;
+    const card = document.createElement("div");
+    card.className = "card" + (isSelected ? " selected" : "");
+    if (!isSelected) {
+      card.onclick = () => openHistory(sym);
+      const bc = blockColorFor(sym);
+      if (bc === "green") card.style.background = "rgba(22,163,74,0.08)";
+      else if (bc === "red") card.style.background = "rgba(220,38,38,0.08)";
+      else if (bc === "gray") card.style.background = "rgba(107,114,128,0.06)";
+    }
+    let inner = `<div class="top"><span class="sym">${sym}</span>${isSelected ? "" : '<button class="rm">remove</button>'}</div>`;
+    if (q) {
+      const up = q.change >= 0;
+      const dotClass = q.source === "live" ? "live" : "cache";
+      inner += `<div class="price">${q.price.toFixed(2)}<span class="dot ${dotClass}" title="${q.source === "live" ? "fresh from api" : "loaded from browser cache"}"></span></div>`;
+      inner += `<div class="change ${up ? "up" : "down"}">${up ? "+" : ""}${q.change.toFixed(2)} (${up ? "+" : ""}${q.percent.toFixed(2)}%)</div>`;
+      inner += `<div class="updated">updated ${q.updated}</div>`;
+    } else {
+      inner += `<div class="waiting">waiting for data</div>`;
+    }
+    if (!isSelected) {
+      inner += `<div class="dpad">
+        <button class="dp" data-dir="up">&#9650;</button>
+        <button class="dp" data-dir="left">&#9664;</button>
+        <button class="dp" data-dir="right">&#9654;</button>
+        <button class="dp" data-dir="down">&#9660;</button>
+      </div>`;
+    }
+    if (isSelected) {
+      const h = history[cacheKeyFor(sym, selectedRange)];
+      const srcText = h ? (h.source === "live" ? "live" : "cached") : "loading";
+      const dotClass = h ? (h.source === "live" ? "live" : "cache") : "cache";
+      inner += `<div class="expandHead">
+        <span style="font-size:12px;color:#6b7280;">historical<span class="dot ${dotClass}"></span><span class="srclabel">${srcText}</span></span>
+        <div class="ranges">
+          <button data-range="1D" class="${selectedRange === "1D" ? "active" : ""}">1D</button>
+          <button data-range="1W" class="${selectedRange === "1W" ? "active" : ""}">1W</button>
+          <button data-range="1M" class="${selectedRange === "1M" ? "active" : ""}">1M</button>
+          <button data-range="3M" class="${selectedRange === "3M" ? "active" : ""}">3M</button>
+          <button data-range="1Y" class="${selectedRange === "1Y" ? "active" : ""}">1Y</button>
+          ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
+          <button data-action="close">close</button>
+        </div>
+      </div>
+      <canvas id="chart" width="1000" height="220"></canvas>`;
+      if (selectedRange === "1M" && showNews) {
+        const n = newsCache[sym];
+        if (!n) {
+          inner += `<div class="newsPanel"><p class="newsStatus">loading news</p></div>`;
+        } else if (n.articles.length === 0) {
+          inner += `<div class="newsPanel"><p class="newsStatus">no articles found in the last 30 days</p></div>`;
+        } else {
+          inner += `<div class="newsPanel">` + n.articles.map(a => {
+            const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
+            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.source} via ${a.origin}</div><div class="newsHeadline">${a.headline}</div></div>`;
+          }).join("") + `</div>`;
+        }
+      }
+    }
+    card.innerHTML = inner;
+    const rmBtn = card.querySelector(".rm");
+    if (rmBtn) rmBtn.onclick = (e) => { e.stopPropagation(); removeTicker(sym); };
+    card.querySelectorAll(".dp").forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); moveTicker(sym, btn.dataset.dir); };
+    });
+    if (isSelected) {
+      card.querySelectorAll(".ranges button[data-range]").forEach(btn => {
+        btn.onclick = (e) => { e.stopPropagation(); changeRange(btn.dataset.range); };
+      });
+      card.querySelector('[data-action="close"]').onclick = (e) => { e.stopPropagation(); closeHistory(); };
+      const newsBtn = card.querySelector('[data-action="news"]');
+      if (newsBtn) newsBtn.onclick = (e) => { e.stopPropagation(); toggleNews(); };
+    }
+    gridEl.appendChild(card);
+  });
+  if (selected) {
+    const points = getPointsForRange(selected, selectedRange);
+    if (points) {
+      const markers = (selectedRange === "1M" && showNews) ? newsMarkersFor(selected, points) : [];
+      requestAnimationFrame(() => drawChart(points, markers));
+    }
+  }
+  const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : 0;
+  footEl.textContent = tickers.length + " tickers across " + keys.length + " keys, full refresh cycle takes about " + cycleSec + " seconds";
+}
+
+function isQuoteFresh(sym) {
+  const q = quotes[sym];
+  return q && Date.now() - q.fetchedAt < QUOTE_TTL_MS;
+}
+
+function startPolling() {
+  tickers.forEach(sym => {
+    if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
+  });
+  setInterval(() => {
+    if (selected) return;
+    tickers.forEach(sym => {
+      if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
+    });
+    refreshBlockColors();
+  }, Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.length, 1)));
+}
+
+function boot() {
+  setupEl.style.display = "none";
+  appEl.style.display = "block";
+  renderKeys();
+  updateBlockMenuButtons();
+  render();
+  refreshBlockColors();
+  startPolling();
+}
+
+if (keys.length > 0) {
+  boot();
+}
+</script>
+</body>
+</html>
