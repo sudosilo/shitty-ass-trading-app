@@ -674,6 +674,7 @@ function moveTicker(sym, dir) {
 }
 
 function removeTicker(sym) {
+  if (!window.confirm("Remove " + sym + " from your tracker?")) return;
   tickers = tickers.filter(t => t !== sym);
   localStorage.setItem("st_tickers", JSON.stringify(tickers));
   if (selected === sym) selected = null;
