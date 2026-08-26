@@ -38,6 +38,14 @@
   .dot.live { background: #16a34a; }
   .dot.cache { background: transparent; border: 1px solid #9ca3af; }
   .srclabel { font-size: 10px; color: #9ca3af; margin-left: 4px; }
+  .sentimentPair { display: inline-flex; gap: 4px; margin-left: 8px; }
+  .sentimentBadge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; }
+  .sentimentBadge.pos { background: rgba(22,163,74,0.12); color: #16a34a; }
+  .sentimentBadge.neg { background: rgba(220,38,38,0.12); color: #dc2626; }
+  .articleTag { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+  .articleTag.positive { background: rgba(22,163,74,0.12); color: #16a34a; }
+  .articleTag.negative { background: rgba(220,38,38,0.12); color: #dc2626; }
+  .articleTag.neutral { background: rgba(107,114,128,0.12); color: #6b7280; }
   .headrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; position: relative; }
   .hamburger { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; cursor: pointer; }
   #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: min(320px, 88vw); max-height: 80vh; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -159,6 +167,7 @@
         <p>Each tile shows the current price, the change for the day, a small dot for whether that price is fresh from the api or loaded from the browser cache, and a faint background color. Open the hamburger menu and pick week, month, or year to set what that color compares against. Green means the current price sits meaningfully below that average, red means meaningfully above, gray means it is sitting close to normal. It is a cheap or expensive signal relative to the stock's own recent history, not a buy or sell call.</p>
         <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
         <p>Two buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a purple dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, so a story covered everywhere stands out from a single mention. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one.</p>
+        <p>Next to the historical label sits a green and red number pair. That is a simple keyword count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, and recall data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent coverage leans one way or the other, not a signal to act on by itself.</p>
         <p>Api keys are entered through the hamburger menu, one box, paste any key from twelve data, finnhub, or gnews and it gets tested against all three and filed under whichever one it belongs to automatically. Multiple keys of the same kind rotate on every request, which raises the effective rate limit and spreads usage so no single key gets burned down. Stored keys only ever show their last four characters.</p>
         <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
       </div>
@@ -770,6 +779,45 @@ function isHistoryFresh(symbol, uiRange) {
   return Date.now() - h.fetchedAt < HISTORY_TTL_MS[apiRangeFor(uiRange)];
 }
 
+const NEGATIVE_KEYWORDS = ["downsizing", "closing stores", "store closures", "closing locations", "shutting down", "layoffs", "laying off", "job cuts", "recall", "lawsuit", "sues", "sued", "investigation", "probe", "bankruptcy", "chapter 11", "missed earnings", "earnings miss", "profit warning", "guidance cut", "cuts guidance", "lowers guidance", "sales decline", "same-store sales decline", "comparable sales decline", "foot traffic decline", "traffic decline", "boycott", "food safety", "contamination", "outbreak", "data breach", "fraud", "resigns", "resignation", "stepping down", "ceo departure", "franchisee lawsuit", "unionize", "union vote", "strike", "protest", "downgrade", "sell rating", "underperform", "price target cut", "cuts price target", "warns", "warning", "weak demand", "slowdown", "restructuring", "impairment", "writedown", "write-down"];
+
+const POSITIVE_KEYWORDS = ["acquisition", "acquires", "acquired", "merger", "merging", "major investment", "invests in", "investment in", "expansion", "expanding", "new stores", "opening locations", "record sales", "beat earnings", "earnings beat", "beats estimates", "exceeds expectations", "raises guidance", "guidance raise", "partnership", "partners with", "menu innovation", "new menu item", "technology upgrade", "automation investment", "upgrade", "buy rating", "outperform", "same-store sales growth", "comparable sales growth", "sales growth", "stock buyback", "share repurchase", "dividend increase", "expands into", "franchise growth", "international expansion", "price target raise", "raises price target", "strong demand", "record quarter", "beats expectations"];
+
+function classifyArticleText(text) {
+  const lower = (text || "").toLowerCase();
+  const negHits = NEGATIVE_KEYWORDS.filter(k => lower.includes(k));
+  const posHits = POSITIVE_KEYWORDS.filter(k => lower.includes(k));
+  let verdict = "neutral";
+  if (posHits.length > negHits.length) verdict = "positive";
+  else if (negHits.length > posHits.length) verdict = "negative";
+  return { verdict: verdict, posHits: posHits, negHits: negHits };
+}
+
+function sentimentScoreFor(symbol) {
+  let positive = 0, negative = 0;
+  const n = newsCache[symbol];
+  if (n) {
+    n.articles.forEach(a => {
+      const c = classifyArticleText(a.headline);
+      if (c.verdict === "positive") positive++;
+      else if (c.verdict === "negative") negative++;
+    });
+  }
+  const magArticles = magazineArticlesFor(symbol);
+  magArticles.forEach(a => {
+    const c = classifyArticleText(a.title + " " + a.snippet);
+    if (c.verdict === "positive") positive++;
+    else if (c.verdict === "negative") negative++;
+  });
+  const rc = recallsCache[symbol];
+  if (rc) {
+    rc.recalls.forEach(r => {
+      if (r.matchedBy === "brand") negative++;
+    });
+  }
+  return { positive: positive, negative: negative };
+}
+
 const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG: "Chipotle", WEN: "Wendy's", JACK: "Jack in the Box", DPZ: "Domino's", PZZA: "Papa John's", QSR: "Restaurant Brands International", WING: "Wingstop", SHAK: "Shake Shack", CAVA: "Cava", PTLO: "Portillo's", BROS: "Dutch Bros", DNUT: "Krispy Kreme", DENN: "Denny's", PBPB: "Potbelly", CHUY: "Chuy's", SG: "Sweetgreen", KRUS: "Kura Sushi", FAT: "FAT Brands", BFI: "BurgerFi", GTIM: "Good Times Restaurants", TAST: "Carrols Restaurant Group", LOCO: "El Pollo Loco", ARCO: "Arcos Dorados", NATH: "Nathan's Famous", FRGI: "Fiesta Restaurant Group", NDLS: "Noodles & Company", YUMC: "Yum China", CBRL: "Cracker Barrel", TXRH: "Texas Roadhouse", CAKE: "Cheesecake Factory", DRI: "Darden Restaurants", EAT: "Brinker International", BLMN: "Bloomin' Brands", DIN: "Dine Brands", FWRG: "First Watch", SYY: "Sysco", USFD: "US Foods", PFGC: "Performance Food Group", ARMK: "Aramark", ECL: "Ecolab", MIDD: "Middleby", CTAS: "Cintas", KO: "Coca-Cola", KDP: "Keurig Dr Pepper", PEP: "PepsiCo", TOST: "Toast", PAR: "PAR Technology", VYX: "NCR Voyix", XYZ: "Block" };
 
 const FDA_RECALL_NAMES = { MCD: "mcdonald's", SBUX: "starbucks", YUM: "yum", CMG: "chipotle", WEN: "wendy's", JACK: "jack in the box", DPZ: "domino's", PZZA: "papa john's", QSR: "burger king", WING: "wingstop", SHAK: "shake shack", CAVA: "cava", PTLO: "portillo's", BROS: "dutch bros", DNUT: "krispy kreme", DENN: "denny's", PBPB: "potbelly", CHUY: "chuy's", SG: "sweetgreen", KRUS: "kura sushi", FAT: "fatburger", BFI: "burgerfi", GTIM: "good times", TAST: "burger king", LOCO: "el pollo loco", ARCO: "mcdonald's", NATH: "nathan's", FRGI: "pollo tropical", NDLS: "noodles", YUMC: "yum china", CBRL: "cracker barrel", TXRH: "texas roadhouse", CAKE: "cheesecake factory", DRI: "olive garden", EAT: "chili's", BLMN: "outback steakhouse", DIN: "ihop", FWRG: "first watch" };
@@ -1335,8 +1383,13 @@ function render() {
       const h = history[cacheKeyFor(sym, selectedRange)];
       const srcText = h ? (h.source === "live" ? "live" : "cached") : "loading";
       const dotClass = h ? (h.source === "live" ? "live" : "cache") : "cache";
+      const sentiment = sentimentScoreFor(sym);
       inner += `<div class="expandHead">
         <span style="font-size:12px;color:#6b7280;">historical<span class="dot ${dotClass}"></span><span class="srclabel">${srcText}</span></span>
+        <span class="sentimentPair" title="based on keyword matches in loaded news, magazine, and recall data, not a real prediction">
+          <span class="sentimentBadge pos">+${sentiment.positive}</span>
+          <span class="sentimentBadge neg">-${sentiment.negative}</span>
+        </span>
         <div class="ranges">
           <button data-range="1D" class="${selectedRange === "1D" ? "active" : ""}">1D</button>
           <button data-range="1W" class="${selectedRange === "1W" ? "active" : ""}">1W</button>
@@ -1359,7 +1412,9 @@ function render() {
         } else {
           inner += `<div class="newsPanel">` + n.articles.map(a => {
             const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
-            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.source} via ${a.origin}</div><div class="newsHeadline">${a.headline}</div></div>`;
+            const c = classifyArticleText(a.headline);
+            const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
+            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.source} via ${a.origin} <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.headline}</div></div>`;
           }).join("") + `</div>`;
         }
       }
@@ -1387,7 +1442,9 @@ function render() {
           } else {
             inner += `<div class="newsPanel">` + matched.map(a => {
               const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
-              return `<div class="newsItem"><div class="newsDate">${d} &middot; QSR Magazine</div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
+              const c = classifyArticleText(a.title + " " + a.snippet);
+              const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
+              return `<div class="newsItem"><div class="newsDate">${d} &middot; QSR Magazine <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
             }).join("") + `</div>`;
           }
         }
