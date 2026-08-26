@@ -49,6 +49,8 @@
   #blockMenu .opts button.active { border-color: #111827; color: #111827; }
   #blockMenu p { font-size: 10px; color: #9ca3af; margin: 8px 0 0 0; }
   #filterSortManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-top: 12px; }
+  #dataManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-top: 12px; }
+  #dataManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
   #filterSortManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
   .filterToggle { width: 100%; font-size: 11px; padding: 6px 8px; }
   .filterToggle.active { border-color: #dc2626; color: #dc2626; }
@@ -123,6 +125,14 @@
         <h3 style="margin-top:10px;">filter</h3>
         <button id="recallFilterBtn" class="filterToggle">show only tickers with recent recalls</button>
         <p id="recallFilterStatus" style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;"></p>
+      </div>
+
+      <div id="dataManager">
+        <h3>data</h3>
+        <button id="exportDataBtn" class="filterToggle">export tickers, cached data, and archived articles</button>
+        <label class="filterToggle" for="importDataInput" style="display:block;text-align:center;margin-top:6px;cursor:pointer;">import from a file</label>
+        <input type="file" id="importDataInput" accept="application/json" style="display:none;">
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">exports your ticker list, price history, news, recalls, and the qsr magazine archive as one file. api keys are never included, you'll re-add those after an import. importing replaces what's currently stored on this device.</p>
       </div>
 
       <div id="keysManager">
@@ -374,6 +384,56 @@ document.getElementById("recallFilterBtn").onclick = (e) => {
   updateBlockMenuButtons();
   if (recallFilterOn) startRecallScan();
   render();
+};
+
+const EXPORT_KEYS = ["st_tickers", "st_ticker_version", "st_quote_cache", "st_history_cache", "st_recalls_cache", "st_news_cache", "st_magazine_cache", "st_block_period", "st_sort_mode", "st_recall_filter"];
+
+document.getElementById("exportDataBtn").onclick = (e) => {
+  e.stopPropagation();
+  const payload = { exportVersion: 1, exportedAt: new Date().toISOString(), data: {} };
+  EXPORT_KEYS.forEach(k => {
+    const v = localStorage.getItem(k);
+    if (v !== null) payload.data[k] = v;
+  });
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "qsr-tracker-export-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  statusEl.textContent = "export downloaded";
+};
+
+document.getElementById("importDataInput").onchange = (e) => {
+  e.stopPropagation();
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(reader.result);
+    } catch (err) {
+      statusEl.textContent = "that file isn't valid json";
+      return;
+    }
+    if (!parsed || !parsed.data) {
+      statusEl.textContent = "that file doesn't look like a tracker export";
+      return;
+    }
+    const count = Object.keys(parsed.data).length;
+    if (!window.confirm("Import " + count + " stored items from this file? This replaces the ticker list, price history, news, recalls, and magazine archive currently on this device. Your api keys are not affected.")) {
+      return;
+    }
+    Object.keys(parsed.data).forEach(k => {
+      if (EXPORT_KEYS.includes(k)) localStorage.setItem(k, parsed.data[k]);
+    });
+    location.reload();
+  };
+  reader.readAsText(file);
 };
 
 function refreshBlockColors() {
@@ -827,6 +887,8 @@ function isMagazineFresh() {
   return magazineCache && Date.now() - magazineCache.fetchedAt < MAGAZINE_TTL_MS;
 }
 
+const MAGAZINE_ARCHIVE_MS = 30 * 24 * 60 * 60000;
+
 async function fetchMagazineFeed() {
   statusEl.textContent = "checking QSR Magazine feed";
   try {
@@ -837,15 +899,24 @@ async function fetchMagazineFeed() {
       statusEl.textContent = "QSR Magazine feed unavailable right now";
       return;
     }
-    const articles = data.items.map(item => ({
+    const fresh = data.items.map(item => ({
+      id: item.link || item.guid || (item.title + "|" + item.pubDate),
       title: item.title,
+      link: item.link || "",
       pubDate: item.pubDate,
       timestamp: Math.floor(new Date(item.pubDate).getTime() / 1000),
       snippet: (item.description || "").replace(/<[^>]+>/g, "").trim().slice(0, 200)
     }));
-    magazineCache = { articles: articles, fetchedAt: Date.now() };
+    const existing = (magazineCache && magazineCache.articles) || [];
+    const byId = {};
+    existing.forEach(a => { byId[a.id] = a; });
+    fresh.forEach(a => { byId[a.id] = a; });
+    const cutoff = Date.now() - MAGAZINE_ARCHIVE_MS;
+    const merged = Object.values(byId).filter(a => a.timestamp * 1000 >= cutoff);
+    merged.sort((a, b) => b.timestamp - a.timestamp);
+    magazineCache = { articles: merged, fetchedAt: Date.now() };
     try { localStorage.setItem("st_magazine_cache", JSON.stringify(magazineCache)); } catch (e) {}
-    statusEl.textContent = "QSR Magazine feed updated, " + articles.length + " articles";
+    statusEl.textContent = "QSR Magazine feed updated, " + merged.length + " articles in the last 30 days";
     render();
   } catch (e) {
     statusEl.textContent = "QSR Magazine feed request failed";
@@ -1312,7 +1383,7 @@ function render() {
         } else {
           const matched = magazineArticlesFor(sym);
           if (matched.length === 0) {
-            inner += `<div class="newsPanel"><p class="newsStatus">no recent QSR Magazine articles mention this chain, feed only covers roughly the last day or two of stories</p></div>`;
+            inner += `<div class="newsPanel"><p class="newsStatus">no QSR Magazine articles mention this chain in the last 30 days</p></div>`;
           } else {
             inner += `<div class="newsPanel">` + matched.map(a => {
               const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
