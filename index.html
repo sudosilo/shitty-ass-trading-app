@@ -92,6 +92,9 @@
   .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
   .ranges button[data-action="magazine"].active { border-color: #2563eb; color: #2563eb; }
   .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+  .sliderRow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .sliderRow input[type="range"] { flex: 1; }
+  .sliderLabel { font-size: 11px; color: #6b7280; white-space: nowrap; }
   .newsStatus { font-size: 11px; color: #9ca3af; margin: 0; }
   .newsItem { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
   .newsDate { font-size: 10px; color: #9ca3af; }
@@ -699,8 +702,10 @@ async function fetchQuoteAlphaVantage(symbol, key) {
   }
 }
 
-const API_RANGE_MAP = { "1D": { interval: "5min", size: 80 }, "1W": { interval: "1h", size: 40 }, "DAILY": { interval: "1day", size: 260 } };
+const API_RANGE_MAP = { "1D": { interval: "5min", size: 780 }, "1W": { interval: "1h", size: 320 }, "DAILY": { interval: "1day", size: 260 } };
 const ALPHA_VANTAGE_INTRADAY_INTERVAL = { "1D": "5min", "1W": "60min" };
+const RANGE_WINDOW_SIZE = { "1D": 78, "1W": 40, "1M": 22, "3M": 66 };
+let rangeOffset = {};
 
 function apiRangeFor(uiRange) {
   return (uiRange === "1M" || uiRange === "3M" || uiRange === "1Y") ? "DAILY" : uiRange;
@@ -708,15 +713,24 @@ function apiRangeFor(uiRange) {
 function cacheKeyFor(symbol, uiRange) {
   return symbol + "_" + apiRangeFor(uiRange);
 }
-function sliceForRange(points, uiRange) {
-  if (uiRange === "1M") return points.slice(-22);
-  if (uiRange === "3M") return points.slice(-66);
-  return points;
+function maxOffsetFor(uiRange, totalPoints) {
+  const win = RANGE_WINDOW_SIZE[uiRange];
+  if (!win) return 0;
+  return Math.max(0, Math.floor(totalPoints / win) - 1);
 }
-function getPointsForRange(symbol, uiRange) {
+function sliceForRange(points, uiRange, offset) {
+  const win = RANGE_WINDOW_SIZE[uiRange];
+  if (!win) return points;
+  const o = Math.max(0, Math.min(offset || 0, maxOffsetFor(uiRange, points.length)));
+  const end = points.length - o * win;
+  const start = Math.max(0, end - win);
+  return points.slice(start, end);
+}
+function getPointsForRange(symbol, uiRange, offset) {
   const h = history[cacheKeyFor(symbol, uiRange)];
   if (!h) return null;
-  return sliceForRange(h.points, uiRange);
+  const useOffset = offset !== undefined ? offset : (rangeOffset[uiRange] || 0);
+  return sliceForRange(h.points, uiRange, useOffset);
 }
 
 async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
@@ -728,7 +742,7 @@ async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
       seriesKey = "Time Series (Daily)";
     } else {
       const interval = ALPHA_VANTAGE_INTRADAY_INTERVAL[apiRange];
-      url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=${interval}&outputsize=compact&apikey=${key}`;
+      url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=${interval}&outputsize=full&apikey=${key}`;
       seriesKey = "Time Series (" + interval + ")";
     }
     const res = await fetch(url);
@@ -739,7 +753,8 @@ async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
       return;
     }
     const points = Object.keys(series).sort().map(d => ({ date: d, close: parseFloat(series[d]["4. close"]) }));
-    const trimmed = apiRange === "DAILY" ? points.slice(-260) : points;
+    const capSize = apiRange === "DAILY" ? 260 : (API_RANGE_MAP[apiRange] ? API_RANGE_MAP[apiRange].size : points.length);
+    const trimmed = points.slice(-capSize);
     history[symbol + "_" + apiRange] = { points: trimmed, fetchedAt: Date.now(), source: "live" };
     saveHistoryCache();
     if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
@@ -984,7 +999,7 @@ function magazineArticlesFor(symbol) {
 function magazineMarkersFor(symbol, points) {
   const articles = magazineArticlesFor(symbol);
   if (articles.length === 0 || !points || points.length === 0) return [];
-  const byIndex = {};
+  const buckets = {};
   articles.forEach(a => {
     const artDate = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
     let bestIdx = -1, bestDiff = Infinity;
@@ -992,11 +1007,16 @@ function magazineMarkersFor(symbol, points) {
       const diff = Math.abs(new Date(p.date.slice(0, 10)).getTime() - new Date(artDate).getTime());
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     });
-    if (bestIdx !== -1 && bestDiff <= 2 * 24 * 60 * 60000) {
-      byIndex[bestIdx] = (byIndex[bestIdx] || 0) + 1;
-    }
+    if (bestIdx === -1 || bestDiff > 2 * 24 * 60 * 60000) return;
+    if (!buckets[bestIdx]) buckets[bestIdx] = { pos: 0, neg: 0, neu: 0 };
+    const c = classifyArticleText(a.title + " " + a.snippet);
+    buckets[bestIdx][c.verdict === "positive" ? "pos" : c.verdict === "negative" ? "neg" : "neu"]++;
   });
-  return Object.keys(byIndex).map(idx => ({ index: parseInt(idx, 10), count: byIndex[idx] }));
+  return Object.keys(buckets).map(idx => {
+    const b = buckets[idx];
+    const sentiment = b.pos > b.neg ? "positive" : b.neg > b.pos ? "negative" : "neutral";
+    return { index: parseInt(idx, 10), count: b.pos + b.neg + b.neu, sentiment: sentiment };
+  });
 }
 
 function toggleMagazine() {
@@ -1101,7 +1121,7 @@ function toggleNews() {
 function newsMarkersFor(symbol, points) {
   const n = newsCache[symbol];
   if (!n || !points || points.length === 0) return [];
-  const counts = {};
+  const buckets = {};
   n.articles.forEach(a => {
     const artDate = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
     let bestIdx = -1, bestDiff = Infinity;
@@ -1109,17 +1129,23 @@ function newsMarkersFor(symbol, points) {
       const diff = Math.abs(new Date(p.date.slice(0, 10)).getTime() - new Date(artDate).getTime());
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     });
-    if (bestIdx !== -1 && bestDiff <= 2 * 24 * 60 * 60000) {
-      counts[bestIdx] = (counts[bestIdx] || 0) + 1;
-    }
+    if (bestIdx === -1 || bestDiff > 2 * 24 * 60 * 60000) return;
+    if (!buckets[bestIdx]) buckets[bestIdx] = { pos: 0, neg: 0, neu: 0 };
+    const c = classifyArticleText(a.headline);
+    buckets[bestIdx][c.verdict === "positive" ? "pos" : c.verdict === "negative" ? "neg" : "neu"]++;
   });
-  return Object.keys(counts).map(idx => ({ index: parseInt(idx, 10), count: counts[idx] }));
+  return Object.keys(buckets).map(idx => {
+    const b = buckets[idx];
+    const sentiment = b.pos > b.neg ? "positive" : b.neg > b.pos ? "negative" : "neutral";
+    return { index: parseInt(idx, 10), count: b.pos + b.neg + b.neu, sentiment: sentiment };
+  });
 }
 
 function openHistory(symbol) {
   if (selected === symbol) return;
   selected = symbol;
   selectedRange = "3M";
+  rangeOffset = {};
   showNews = false;
   showRecalls = false;
   showMagazine = false;
@@ -1131,6 +1157,7 @@ function openHistory(symbol) {
 
 function closeHistory() {
   selected = null;
+  rangeOffset = {};
   showNews = false;
   showRecalls = false;
   showMagazine = false;
@@ -1145,6 +1172,11 @@ function changeRange(range) {
   if (!isHistoryFresh(selected, range)) {
     enqueue({ type: "history", symbol: selected, run: (k) => fetchHistory(selected, range, k) });
   }
+}
+
+function setRangeOffset(uiRange, offset) {
+  rangeOffset[uiRange] = offset;
+  render();
 }
 
 function gridColumnCount() {
@@ -1282,7 +1314,8 @@ function drawChart(points, markers) {
         const magMax = Math.max(1, ...markers.filter(mk => mk.kind === "magazine").map(mk => mk.count));
         const radius = 3 + Math.min(m.count, 8) * 2.2;
         const alpha = 0.35 + (m.count / magMax) * 0.55;
-        ctx.fillStyle = `rgba(37,99,235,${alpha})`;
+        const magBase = m.sentiment === "positive" ? "22,163,74" : m.sentiment === "negative" ? "220,38,38" : "37,99,235";
+        ctx.fillStyle = `rgba(${magBase},${alpha})`;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -1299,7 +1332,8 @@ function drawChart(points, markers) {
         const radius = 3 + Math.min(m.count, 8) * 2.2;
         const intensity = m.count / newsMax;
         const alpha = 0.35 + intensity * 0.55;
-        ctx.fillStyle = `rgba(124,58,237,${alpha})`;
+        const newsBase = m.sentiment === "positive" ? "22,163,74" : m.sentiment === "negative" ? "220,38,38" : "124,58,237";
+        ctx.fillStyle = `rgba(${newsBase},${alpha})`;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -1403,6 +1437,18 @@ function render() {
         </div>
       </div>
       <canvas id="chart" width="1000" height="220"></canvas>`;
+      if (RANGE_WINDOW_SIZE[selectedRange]) {
+        const h = history[cacheKeyFor(sym, selectedRange)];
+        const totalPoints = h ? h.points.length : 0;
+        const maxOff = maxOffsetFor(selectedRange, totalPoints);
+        const curOff = Math.min(rangeOffset[selectedRange] || 0, maxOff);
+        const rangeLabel = selectedRange === "1D" ? "day" : selectedRange === "1W" ? "week" : selectedRange === "1M" ? "month" : "quarter";
+        const offsetLabel = curOff === 0 ? "current " + rangeLabel : curOff + " " + rangeLabel + (curOff > 1 ? "s" : "") + " back";
+        inner += `<div class="sliderRow">
+          <input type="range" class="periodSlider" min="0" max="${maxOff}" value="${curOff}" ${maxOff === 0 ? "disabled" : ""}>
+          <span class="sliderLabel">${maxOff === 0 ? "no earlier data cached yet" : offsetLabel}</span>
+        </div>`;
+      }
       if (selectedRange === "1M" && showNews) {
         const n = newsCache[sym];
         if (!n) {
@@ -1467,6 +1513,11 @@ function render() {
       if (recallsBtn) recallsBtn.onclick = (e) => { e.stopPropagation(); toggleRecalls(); };
       const magBtn = card.querySelector('[data-action="magazine"]');
       if (magBtn) magBtn.onclick = (e) => { e.stopPropagation(); toggleMagazine(); };
+      const slider = card.querySelector('.periodSlider');
+      if (slider) {
+        slider.oninput = (e) => { e.stopPropagation(); };
+        slider.onchange = (e) => { e.stopPropagation(); setRangeOffset(selectedRange, parseInt(e.target.value, 10)); };
+      }
     }
     gridEl.appendChild(card);
   });
