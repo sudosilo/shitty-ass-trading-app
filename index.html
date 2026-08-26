@@ -48,6 +48,10 @@
   #blockMenu .opts button { flex: 1; font-size: 12px; padding: 6px 0; }
   #blockMenu .opts button.active { border-color: #111827; color: #111827; }
   #blockMenu p { font-size: 10px; color: #9ca3af; margin: 8px 0 0 0; }
+  #filterSortManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-top: 12px; }
+  #filterSortManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
+  .filterToggle { width: 100%; font-size: 11px; padding: 6px 8px; }
+  .filterToggle.active { border-color: #dc2626; color: #dc2626; }
   #infoOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 20; align-items: center; justify-content: center; padding: 20px; }
   #infoOverlay.open { display: flex; }
   #infoPanel { background: #fff; border-radius: 10px; max-width: 480px; max-height: 80vh; overflow-y: auto; padding: 16px; }
@@ -100,12 +104,25 @@
     <h1 style="margin:0;">qsr tracker</h1>
     <div id="blockMenu">
       <h3>block color average</h3>
-      <div class="opts">
+      <div class="opts" id="periodOpts">
         <button data-period="1W">week</button>
         <button data-period="1M">month</button>
         <button data-period="1Y">year</button>
       </div>
       <p>tile background reflects current price vs the selected average, green below average, red above, gray near it</p>
+
+      <div id="filterSortManager">
+        <h3>sort tiles</h3>
+        <div class="opts" id="sortOpts">
+          <button data-sort="default">manual order</button>
+          <button data-sort="green">green first</button>
+          <button data-sort="red">red first</button>
+          <button data-sort="movers">biggest movers</button>
+        </div>
+        <h3 style="margin-top:10px;">filter</h3>
+        <button id="recallFilterBtn" class="filterToggle">show only tickers with recent recalls</button>
+        <p id="recallFilterStatus" style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;"></p>
+      </div>
 
       <div id="keysManager">
         <h3>api keys (<span id="keyCount">0</span>, refresh cycle: <span id="cycleTime">-</span>)</h3>
@@ -173,6 +190,10 @@ Object.values(history).forEach(h => { h.source = "cache"; });
 let selected = null;
 let selectedRange = "3M";
 let blockPeriod = localStorage.getItem("st_block_period") || "1W";
+let sortMode = localStorage.getItem("st_sort_mode") || "default";
+let recallFilterOn = localStorage.getItem("st_recall_filter") === "true";
+let recallFetchQueue = [];
+const RECENT_RECALL_WINDOW_MS = 90 * 24 * 60 * 60000;
 let queue = [];
 let keyCooldowns = {};
 let showNews = false;
@@ -281,7 +302,7 @@ readAloudBtn.onclick = () => {
   readAloudBtn.textContent = "stop reading";
 };
 
-document.querySelectorAll("#blockMenu .opts button").forEach(btn => {
+document.querySelectorAll("#periodOpts button").forEach(btn => {
   btn.onclick = (e) => {
     e.stopPropagation();
     blockPeriod = btn.dataset.period;
@@ -292,10 +313,35 @@ document.querySelectorAll("#blockMenu .opts button").forEach(btn => {
   };
 });
 function updateBlockMenuButtons() {
-  document.querySelectorAll("#blockMenu .opts button").forEach(btn => {
+  document.querySelectorAll("#periodOpts button").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.period === blockPeriod);
   });
+  document.querySelectorAll("#sortOpts button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.sort === sortMode);
+  });
+  const recallBtn = document.getElementById("recallFilterBtn");
+  if (recallBtn) recallBtn.classList.toggle("active", recallFilterOn);
 }
+
+document.querySelectorAll("#sortOpts button").forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    sortMode = btn.dataset.sort;
+    localStorage.setItem("st_sort_mode", sortMode);
+    updateBlockMenuButtons();
+    render();
+  };
+});
+
+document.getElementById("recallFilterBtn").onclick = (e) => {
+  e.stopPropagation();
+  recallFilterOn = !recallFilterOn;
+  localStorage.setItem("st_recall_filter", String(recallFilterOn));
+  updateBlockMenuButtons();
+  if (recallFilterOn) startRecallScan();
+  render();
+};
+
 function refreshBlockColors() {
   tickers.forEach(sym => {
     if (!isHistoryFresh(sym, blockPeriod)) {
@@ -622,6 +668,40 @@ async function fetchRecalls(symbol) {
   render();
 }
 
+function hasRecentRecall(symbol) {
+  const r = recallsCache[symbol];
+  if (!r) return null;
+  const cutoff = Date.now() - RECENT_RECALL_WINDOW_MS;
+  const recent = r.recalls.filter(rec => rec.timestamp * 1000 >= cutoff);
+  if (recent.length === 0) return false;
+  const worst = recent.reduce((a, b) => {
+    const rank = { "Class I": 3, "Class II": 2, "Class III": 1 };
+    return (rank[b.classification] || 0) > (rank[a.classification] || 0) ? b : a;
+  });
+  return worst.classification;
+}
+
+function startRecallScan() {
+  recallFetchQueue = tickers.filter(sym => !isRecallsFresh(sym) && (FDA_RECALL_NAMES[sym] || INGREDIENT_KEYWORDS[sym]));
+  updateRecallScanStatus();
+}
+
+setInterval(() => {
+  if (recallFetchQueue.length === 0) return;
+  const sym = recallFetchQueue.shift();
+  fetchRecalls(sym).then(updateRecallScanStatus);
+}, 2000);
+
+function updateRecallScanStatus() {
+  const el = document.getElementById("recallFilterStatus");
+  if (!el) return;
+  if (recallFetchQueue.length > 0) {
+    el.textContent = "scanning recalls, " + recallFetchQueue.length + " tickers left, about " + Math.round(recallFetchQueue.length * 2) + "s";
+  } else {
+    el.textContent = "recall scan complete";
+  }
+}
+
 function toggleRecalls() {
   showRecalls = !showRecalls;
   if (showRecalls && !isRecallsFresh(selected)) {
@@ -912,9 +992,37 @@ function drawChart(points, markers) {
   }
 }
 
+function getDisplayOrder() {
+  let list = tickers.slice();
+  if (recallFilterOn) {
+    list = list.filter(sym => hasRecentRecall(sym));
+  }
+  if (sortMode === "green" || sortMode === "red") {
+    const rank = { green: 0, gray: 1, red: 2, null: 3 };
+    list.sort((a, b) => {
+      let ra = rank[blockColorFor(a)] ?? 3;
+      let rb = rank[blockColorFor(b)] ?? 3;
+      if (sortMode === "red") { ra = 2 - ra === -1 ? 3 : 2 - ra; rb = 2 - rb === -1 ? 3 : 2 - rb; }
+      return ra - rb;
+    });
+  } else if (sortMode === "movers") {
+    list.sort((a, b) => {
+      const qa = quotes[a], qb = quotes[b];
+      const pa = qa ? Math.abs(qa.percent) : -1;
+      const pb = qb ? Math.abs(qb.percent) : -1;
+      return pb - pa;
+    });
+  }
+  return list;
+}
+
 function render() {
   gridEl.innerHTML = "";
-  tickers.forEach(sym => {
+  const displayList = getDisplayOrder();
+  if (recallFilterOn && displayList.length === 0) {
+    gridEl.innerHTML = '<p style="grid-column:1/-1;font-size:12px;color:#9ca3af;">no tickers with a recall in the last 90 days, or the scan is still running</p>';
+  }
+  displayList.forEach(sym => {
     const q = quotes[sym];
     const isSelected = selected === sym;
     const card = document.createElement("div");
@@ -926,7 +1034,9 @@ function render() {
       else if (bc === "red") card.style.background = "rgba(220,38,38,0.08)";
       else if (bc === "gray") card.style.background = "rgba(107,114,128,0.06)";
     }
-    let inner = `<div class="top"><span class="sym">${sym}</span>${isSelected ? "" : '<button class="rm">remove</button>'}</div>`;
+    const recallSeverity = hasRecentRecall(sym);
+    const recallBadge = recallSeverity ? `<span class="dot" style="background:${recallSeverity === "Class I" ? "#dc2626" : recallSeverity === "Class II" ? "#f97316" : "#eab308"};border:none;" title="recent recall"></span>` : "";
+    let inner = `<div class="top"><span class="sym">${sym}${recallBadge}</span>${isSelected ? "" : '<button class="rm">remove</button>'}</div>`;
     if (q) {
       const up = q.change >= 0;
       const dotClass = q.source === "live" ? "live" : "cache";
