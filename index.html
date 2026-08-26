@@ -132,7 +132,7 @@
           <input id="addKeyInput" type="text" placeholder="paste any api key">
           <button id="addKeyBtn">add</button>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, finnhub, or gnews key, it gets tested and filed automatically. twelve data powers quotes and charts, finnhub and gnews power the 1M news button.</p>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, finnhub, or gnews key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, finnhub and gnews power the 1M news button. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -169,10 +169,40 @@
 const DEFAULT_TICKERS = ["MCD","YUM","SBUX","CMG","QSR","WEN","DPZ","JACK","PZZA","SHAK","WING","LOCO","ARCO","BROS","PTLO","NATH","CAVA","FRGI","NDLS","YUMC","DNUT","DENN","PBPB","CHUY","SG","KRUS","FAT","BFI","GTIM","TAST","CBRL","TXRH","CAKE","DRI","EAT","BLMN","DIN","FWRG","SYY","USFD","PFGC","ARMK","ECL","MIDD","CTAS","KO","KDP","PEP","TOST","PAR","VYX","XYZ"];
 const TICKER_SET_VERSION = "qsr3";
 const KEY_COOLDOWN_MS = 7600;
+const PROVIDER_COOLDOWN_MS = { twelvedata: 7600, alphavantage: 12500 };
+const ALPHA_VANTAGE_DAILY_CAP = 25;
 const QUOTE_TTL_MS = 45000;
 const HISTORY_TTL_MS = { "1D": 5 * 60000, "1W": 60 * 60000, "DAILY": 24 * 60 * 60000 };
 
-let keys = JSON.parse(localStorage.getItem("st_keys") || "null") || [];
+function loadKeysArray() {
+  const raw = JSON.parse(localStorage.getItem("st_keys") || "null") || [];
+  return raw.map(k => (typeof k === "string" ? { provider: "twelvedata", key: k } : k));
+}
+function saveKeysArray() {
+  localStorage.setItem("st_keys", JSON.stringify(keys));
+}
+let alphaVantageUsage = JSON.parse(localStorage.getItem("st_av_usage") || "null") || {};
+function saveAlphaVantageUsage() {
+  localStorage.setItem("st_av_usage", JSON.stringify(alphaVantageUsage));
+}
+function todayStamp() {
+  return new Date().toISOString().slice(0, 10);
+}
+function alphaVantageCallsLeft(key) {
+  const u = alphaVantageUsage[key];
+  if (!u || u.date !== todayStamp()) return ALPHA_VANTAGE_DAILY_CAP;
+  return Math.max(0, ALPHA_VANTAGE_DAILY_CAP - u.count);
+}
+function recordAlphaVantageUsage(key) {
+  const today = todayStamp();
+  if (!alphaVantageUsage[key] || alphaVantageUsage[key].date !== today) {
+    alphaVantageUsage[key] = { date: today, count: 0 };
+  }
+  alphaVantageUsage[key].count++;
+  saveAlphaVantageUsage();
+}
+
+let keys = loadKeysArray();
 const needsMigration = localStorage.getItem("st_ticker_version") !== TICKER_SET_VERSION;
 let tickers = JSON.parse(localStorage.getItem("st_tickers") || "null") || DEFAULT_TICKERS.slice();
 let quotes = JSON.parse(localStorage.getItem("st_quote_cache") || "null") || {};
@@ -368,8 +398,8 @@ document.getElementById("saveKeyBtn").onclick = () => {
   const raw = document.getElementById("keyInput").value;
   const parsed = raw.split(/[\n,]/).map(k => k.trim()).filter(Boolean);
   if (parsed.length === 0) return;
-  keys = parsed;
-  localStorage.setItem("st_keys", JSON.stringify(keys));
+  keys = parsed.map(k => ({ provider: "twelvedata", key: k }));
+  saveKeysArray();
   boot();
 };
 
@@ -381,12 +411,26 @@ async function detectAndAddKey(raw) {
     const r = await fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`);
     const d = await r.json();
     if (d && d.symbol && !d.code) {
-      if (!keys.includes(raw)) {
-        keys.push(raw);
-        localStorage.setItem("st_keys", JSON.stringify(keys));
+      if (!keys.some(k => k.provider === "twelvedata" && k.key === raw)) {
+        keys.push({ provider: "twelvedata", key: raw });
+        saveKeysArray();
       }
       renderKeys();
       statusEl.textContent = "added as a twelve data key";
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
+    const d = await r.json();
+    if (d && d["Global Quote"] && d["Global Quote"]["05. price"]) {
+      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
+        keys.push({ provider: "alphavantage", key: raw });
+        saveKeysArray();
+      }
+      renderKeys();
+      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
       return;
     }
   } catch (e) {}
@@ -419,7 +463,7 @@ async function detectAndAddKey(raw) {
     }
   } catch (e) {}
 
-  statusEl.textContent = "key not recognized by twelve data, finnhub, or gnews";
+  statusEl.textContent = "key not recognized by twelve data, alpha vantage, finnhub, or gnews";
 }
 
 document.getElementById("addKeyBtn").onclick = () => {
@@ -438,12 +482,12 @@ document.getElementById("addBtn").onclick = () => {
   localStorage.setItem("st_tickers", JSON.stringify(tickers));
   input.value = "";
   render();
-  enqueue({ type: "quote", symbol: sym, run: (key) => fetchQuote(sym, key) });
+  enqueue({ type: "quote", symbol: sym, run: (keyObj) => fetchQuote(sym, keyObj) });
 };
 
 function removeKey(k) {
-  keys = keys.filter(x => x !== k);
-  localStorage.setItem("st_keys", JSON.stringify(keys));
+  keys = keys.filter(x => x.key !== k);
+  saveKeysArray();
   renderKeys();
 }
 function removeFinnhubKey(k) {
@@ -466,10 +510,12 @@ function renderKeys() {
   keys.forEach(k => {
     const row = document.createElement("div");
     row.className = "keyrow";
-    row.innerHTML = `<span class="keylabel">twelve data</span><span>${maskKey(k)}</span>`;
+    const label = k.provider === "alphavantage" ? "alpha vantage" : "twelve data";
+    const extra = k.provider === "alphavantage" ? ` (${alphaVantageCallsLeft(k.key)} left today)` : "";
+    row.innerHTML = `<span class="keylabel">${label}</span><span>${maskKey(k.key)}${extra}</span>`;
     const rm = document.createElement("button");
     rm.textContent = "remove";
-    rm.onclick = () => removeKey(k);
+    rm.onclick = () => removeKey(k.key);
     row.appendChild(rm);
     keyListEl.appendChild(row);
   });
@@ -493,8 +539,9 @@ function renderKeys() {
     row.appendChild(rm);
     keyListEl.appendChild(row);
   });
+  const tdCount = keys.filter(k => k.provider === "twelvedata").length;
   keyCountEl.textContent = keys.length;
-  const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : "-";
+  const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / Math.max(tdCount, 1) / 1000) : "-";
   cycleTimeEl.textContent = cycleSec + "s";
 }
 
@@ -502,16 +549,19 @@ function enqueue(job) {
   queue.push(job);
 }
 
-function keyAvailable(k) {
-  const last = keyCooldowns[k] || 0;
-  return Date.now() - last >= KEY_COOLDOWN_MS;
+function keyAvailable(keyObj) {
+  const last = keyCooldowns[keyObj.key] || 0;
+  const cooldown = PROVIDER_COOLDOWN_MS[keyObj.provider] || KEY_COOLDOWN_MS;
+  if (Date.now() - last < cooldown) return false;
+  if (keyObj.provider === "alphavantage" && alphaVantageCallsLeft(keyObj.key) <= 0) return false;
+  return true;
 }
 
 setInterval(() => {
   if (queue.length === 0 || keys.length === 0) return;
-  for (const k of keys) {
+  for (const keyObj of keys) {
     if (queue.length === 0) break;
-    if (!keyAvailable(k)) continue;
+    if (!keyAvailable(keyObj)) continue;
     let idx;
     if (selected) {
       idx = queue.findIndex(j => j.type === "history" && j.symbol === selected);
@@ -520,12 +570,15 @@ setInterval(() => {
     }
     if (idx === -1) continue;
     const job = queue.splice(idx, 1)[0];
-    keyCooldowns[k] = Date.now();
-    Promise.resolve(job.run(k)).catch(() => {});
+    keyCooldowns[keyObj.key] = Date.now();
+    if (keyObj.provider === "alphavantage") recordAlphaVantageUsage(keyObj.key);
+    Promise.resolve(job.run(keyObj)).catch(() => {});
   }
 }, 500);
 
-async function fetchQuote(symbol, key) {
+async function fetchQuote(symbol, keyObj) {
+  if (keyObj.provider === "alphavantage") return fetchQuoteAlphaVantage(symbol, keyObj.key);
+  const key = keyObj.key;
   try {
     const res = await fetch(`https://api.twelvedata.com/quote?symbol=${symbol}&apikey=${key}`);
     const data = await res.json();
@@ -549,7 +602,36 @@ async function fetchQuote(symbol, key) {
   }
 }
 
+async function fetchQuoteAlphaVantage(symbol, key) {
+  try {
+    const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${key}`);
+    const data = await res.json();
+    const gq = data["Global Quote"];
+    if (!gq || !gq["05. price"]) {
+      statusEl.textContent = symbol + " (alpha vantage): " + (data["Note"] || data["Information"] || "no data");
+      return;
+    }
+    const price = parseFloat(gq["05. price"]);
+    const change = parseFloat(gq["09. change"]);
+    const percent = parseFloat((gq["10. change percent"] || "0").replace("%", ""));
+    quotes[symbol] = {
+      price: price,
+      change: change,
+      percent: percent,
+      updated: new Date().toLocaleTimeString(),
+      fetchedAt: Date.now(),
+      source: "live"
+    };
+    saveQuoteCache();
+    statusEl.textContent = "";
+    render();
+  } catch (e) {
+    statusEl.textContent = symbol + " (alpha vantage): request failed";
+  }
+}
+
 const API_RANGE_MAP = { "1D": { interval: "5min", size: 80 }, "1W": { interval: "1h", size: 40 }, "DAILY": { interval: "1day", size: 260 } };
+const ALPHA_VANTAGE_INTRADAY_INTERVAL = { "1D": "5min", "1W": "60min" };
 
 function apiRangeFor(uiRange) {
   return (uiRange === "1M" || uiRange === "3M" || uiRange === "1Y") ? "DAILY" : uiRange;
@@ -568,7 +650,40 @@ function getPointsForRange(symbol, uiRange) {
   return sliceForRange(h.points, uiRange);
 }
 
-async function fetchHistory(symbol, uiRange, key) {
+async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
+  const apiRange = apiRangeFor(uiRange);
+  try {
+    let url, seriesKey;
+    if (apiRange === "DAILY") {
+      url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=full&apikey=${key}`;
+      seriesKey = "Time Series (Daily)";
+    } else {
+      const interval = ALPHA_VANTAGE_INTRADAY_INTERVAL[apiRange];
+      url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=${interval}&outputsize=compact&apikey=${key}`;
+      seriesKey = "Time Series (" + interval + ")";
+    }
+    const res = await fetch(url);
+    const data = await res.json();
+    const series = data[seriesKey];
+    if (!series) {
+      statusEl.textContent = symbol + " history (alpha vantage): " + (data["Note"] || data["Information"] || "no data");
+      return;
+    }
+    const points = Object.keys(series).sort().map(d => ({ date: d, close: parseFloat(series[d]["4. close"]) }));
+    const trimmed = apiRange === "DAILY" ? points.slice(-260) : points;
+    history[symbol + "_" + apiRange] = { points: trimmed, fetchedAt: Date.now(), source: "live" };
+    saveHistoryCache();
+    if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+      render();
+    }
+  } catch (e) {
+    statusEl.textContent = symbol + " history (alpha vantage): request failed";
+  }
+}
+
+async function fetchHistory(symbol, uiRange, keyObj) {
+  if (keyObj.provider === "alphavantage") return fetchHistoryAlphaVantage(symbol, uiRange, keyObj.key);
+  const key = keyObj.key;
   const apiRange = apiRangeFor(uiRange);
   const cfg = API_RANGE_MAP[apiRange];
   try {
@@ -1256,7 +1371,7 @@ function startPolling() {
       if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
     });
     refreshBlockColors();
-  }, Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.length, 1)));
+  }, Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "twelvedata").length, 1)));
 }
 
 function boot() {
