@@ -574,11 +574,14 @@ async function fetchRecalls(symbol) {
     return;
   }
   statusEl.textContent = "checking FDA recalls for " + symbol;
-  const RETAIL_EXCLUDE = ["albertsons", "kroger", "walmart", "safeway", "publix", "costco", "trader joe", "whole foods", "target", "sam's club", "sams club", "aldi", "meijer", "wegmans", "h-e-b", "heb grocery", "giant food", "giant eagle", "stop & shop", "stop and shop", "food lion", "winn-dixie", "winn dixie", "shoprite", "vons", "ralphs", "hy-vee", "hyvee", "sprouts farmers", "harris teeter", "food city", "ingles market", "smart & final", "save-a-lot", "save a lot"];
-  const isRetailer = (firm) => {
-    if (!firm) return false;
-    const lower = firm.toLowerCase();
-    return RETAIL_EXCLUDE.some(r => lower.includes(r));
+  const RETAIL_EXCLUDE = ["albertsons", "kroger", "walmart", "safeway", "publix", "costco", "trader joe", "whole foods", "target", "sam's club", "sams club", "aldi", "meijer", "wegmans", "h-e-b", "heb grocery", "giant food", "giant eagle", "stop & shop", "stop and shop", "food lion", "winn-dixie", "winn dixie", "shoprite", "vons", "ralphs", "hy-vee", "hyvee", "sprouts farmers", "harris teeter", "food city", "ingles market", "smart & final", "save-a-lot", "save a lot", "acme markets", "jewel-osco", "jewel osco", "king soopers", "fred meyer", "fry's food", "frys food", "qfc", "pavilions", "tom thumb", "randalls", "star market", "shaw's", "shaws supermarket", "market basket", "price chopper", "market 32", "big y", "hannaford", "lowes foods", "food 4 less", "foodmaxx", "sprouts", "gristedes", "raley's", "raleys", "bashas", "brookshire", "piggly wiggly", "weis markets", "schnucks", "hen house", "cub foods", "festival foods", "wholesale club", "bj's wholesale", "bjs wholesale"];
+  const PRIVATE_LABEL_BRANDS = ["kirkland signature", "great value", "simple truth", "market pantry", "good & gather", "good and gather", "member's mark", "members mark", "signature select", "365 everyday value", "o organics", "365 by whole foods", "365 whole foods", "publix brand", "trader joe's brand", "wegmans brand", "safeway brand", "kroger brand", "essential everyday", "private selection", "our family brand", "always save", "food club brand", "harris teeter brand", "h-e-b brand", "heb brand"];
+  const isRetailChannel = (firm, product) => {
+    const firmLower = (firm || "").toLowerCase();
+    const productLower = (product || "").toLowerCase();
+    if (RETAIL_EXCLUDE.some(r => firmLower.includes(r))) return true;
+    if (PRIVATE_LABEL_BRANDS.some(b => productLower.includes(b))) return true;
+    return false;
   };
   const mapResult = (r, matchedBy) => ({
     timestamp: Math.floor(parseFDADate(r.report_date) / 1000),
@@ -596,7 +599,7 @@ async function fetchRecalls(symbol) {
     }
     if (ingredientTerm) {
       const ingUrl = "https://api.fda.gov/food/enforcement.json?search=product_description:\"" + encodeURIComponent(ingredientTerm) + "\"&sort=report_date:desc&limit=50";
-      requests.push(fetch(ingUrl).then(r => r.json()).then(d => (d.results || []).map(r => mapResult(r, "supplier")).filter(r => !isRetailer(r.recallingFirm))).catch(() => []));
+      requests.push(fetch(ingUrl).then(r => r.json()).then(d => (d.results || []).map(r => mapResult(r, "supplier")).filter(r => !isRetailChannel(r.recallingFirm, r.product))).catch(() => []));
     }
     const resultSets = await Promise.all(requests);
     const seen = new Set();
