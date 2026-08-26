@@ -80,6 +80,7 @@
   #keysManager .keyrow button { font-size: 10px; padding: 3px 6px; margin-left: auto; }
   #keysManager input { font-size: 11px; padding: 6px 8px; }
   .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
+  .ranges button[data-action="magazine"].active { border-color: #2563eb; color: #2563eb; }
   .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
   .newsStatus { font-size: 11px; color: #9ca3af; margin: 0; }
   .newsItem { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
@@ -198,6 +199,9 @@ let queue = [];
 let keyCooldowns = {};
 let showNews = false;
 let showRecalls = false;
+let showMagazine = false;
+let magazineCache = JSON.parse(localStorage.getItem("st_magazine_cache") || "null") || null;
+const MAGAZINE_TTL_MS = 60 * 60000;
 let newsCache = JSON.parse(localStorage.getItem("st_news_cache") || "null") || {};
 const NEWS_TTL_MS = 30 * 60000;
 
@@ -596,6 +600,8 @@ const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG
 const FDA_RECALL_NAMES = { MCD: "mcdonald's", SBUX: "starbucks", YUM: "yum", CMG: "chipotle", WEN: "wendy's", JACK: "jack in the box", DPZ: "domino's", PZZA: "papa john's", QSR: "burger king", WING: "wingstop", SHAK: "shake shack", CAVA: "cava", PTLO: "portillo's", BROS: "dutch bros", DNUT: "krispy kreme", DENN: "denny's", PBPB: "potbelly", CHUY: "chuy's", SG: "sweetgreen", KRUS: "kura sushi", FAT: "fatburger", BFI: "burgerfi", GTIM: "good times", TAST: "burger king", LOCO: "el pollo loco", ARCO: "mcdonald's", NATH: "nathan's", FRGI: "pollo tropical", NDLS: "noodles", YUMC: "yum china", CBRL: "cracker barrel", TXRH: "texas roadhouse", CAKE: "cheesecake factory", DRI: "olive garden", EAT: "chili's", BLMN: "outback steakhouse", DIN: "ihop", FWRG: "first watch" };
 
 const INGREDIENT_KEYWORDS = { MCD: "beef", SBUX: "coffee", YUM: "chicken", CMG: "lettuce", WEN: "beef", JACK: "beef", DPZ: "cheese", PZZA: "cheese", QSR: "beef", WING: "chicken", SHAK: "beef", CAVA: "lettuce", PTLO: "beef", BROS: "coffee", DNUT: "flour", DENN: "eggs", PBPB: "turkey", CHUY: "chicken", SG: "lettuce", KRUS: "fish", FAT: "beef", BFI: "beef", GTIM: "beef", TAST: "beef", LOCO: "chicken", ARCO: "beef", NATH: "beef", FRGI: "chicken", NDLS: "pasta", YUMC: "chicken", CBRL: "eggs", TXRH: "beef", CAKE: "cheese", DRI: "pasta", EAT: "beef", BLMN: "beef", DIN: "eggs", FWRG: "eggs" };
+
+const MAGAZINE_MATCH_NAMES = { MCD: ["mcdonald's", "mcdonalds"], SBUX: ["starbucks"], YUM: ["kfc", "taco bell", "pizza hut", "yum brands", "yum!"], CMG: ["chipotle"], WEN: ["wendy's", "wendys"], JACK: ["jack in the box"], DPZ: ["domino's", "dominos"], PZZA: ["papa john's", "papa johns"], QSR: ["burger king", "popeyes", "tim hortons", "firehouse subs", "restaurant brands"], WING: ["wingstop"], SHAK: ["shake shack"], CAVA: ["cava"], PTLO: ["portillo's", "portillos"], BROS: ["dutch bros"], DNUT: ["krispy kreme"], DENN: ["denny's", "dennys"], PBPB: ["potbelly"], CHUY: ["chuy's", "chuys"], SG: ["sweetgreen"], KRUS: ["kura sushi"], FAT: ["fatburger", "johnny rockets", "fat brands"], BFI: ["burgerfi"], GTIM: ["good times"], TAST: ["carrols", "burger king"], LOCO: ["el pollo loco"], ARCO: ["arcos dorados"], NATH: ["nathan's", "nathans famous"], FRGI: ["pollo tropical", "taco cabana", "fiesta restaurant"], NDLS: ["noodles & company", "noodles and company"], YUMC: ["yum china", "kfc china", "pizza hut china"], CBRL: ["cracker barrel"], TXRH: ["texas roadhouse"], CAKE: ["cheesecake factory"], DRI: ["olive garden", "longhorn steakhouse", "darden"], EAT: ["chili's", "chilis", "brinker"], BLMN: ["outback steakhouse", "bloomin'"], DIN: ["ihop", "applebee's", "applebees", "dine brands"], FWRG: ["first watch"] };
 let recallsCache = JSON.parse(localStorage.getItem("st_recalls_cache") || "null") || {};
 const RECALL_TTL_MS = 24 * 60 * 60000;
 
@@ -699,6 +705,72 @@ function updateRecallScanStatus() {
     el.textContent = "scanning recalls, " + recallFetchQueue.length + " tickers left, about " + Math.round(recallFetchQueue.length * 2) + "s";
   } else {
     el.textContent = "recall scan complete";
+  }
+}
+
+function isMagazineFresh() {
+  return magazineCache && Date.now() - magazineCache.fetchedAt < MAGAZINE_TTL_MS;
+}
+
+async function fetchMagazineFeed() {
+  statusEl.textContent = "checking QSR Magazine feed";
+  try {
+    const feedUrl = encodeURIComponent("https://www.qsrmagazine.com/feed/");
+    const res = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + feedUrl);
+    const data = await res.json();
+    if (data.status !== "ok" || !Array.isArray(data.items)) {
+      statusEl.textContent = "QSR Magazine feed unavailable right now";
+      return;
+    }
+    const articles = data.items.map(item => ({
+      title: item.title,
+      pubDate: item.pubDate,
+      timestamp: Math.floor(new Date(item.pubDate).getTime() / 1000),
+      snippet: (item.description || "").replace(/<[^>]+>/g, "").trim().slice(0, 200)
+    }));
+    magazineCache = { articles: articles, fetchedAt: Date.now() };
+    try { localStorage.setItem("st_magazine_cache", JSON.stringify(magazineCache)); } catch (e) {}
+    statusEl.textContent = "QSR Magazine feed updated, " + articles.length + " articles";
+    render();
+  } catch (e) {
+    statusEl.textContent = "QSR Magazine feed request failed";
+  }
+}
+
+function magazineArticlesFor(symbol) {
+  if (!magazineCache) return [];
+  const names = MAGAZINE_MATCH_NAMES[symbol];
+  if (!names) return [];
+  return magazineCache.articles.filter(a => {
+    const t = a.title.toLowerCase();
+    return names.some(n => t.includes(n));
+  });
+}
+
+function magazineMarkersFor(symbol, points) {
+  const articles = magazineArticlesFor(symbol);
+  if (articles.length === 0 || !points || points.length === 0) return [];
+  const byIndex = {};
+  articles.forEach(a => {
+    const artDate = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
+    let bestIdx = -1, bestDiff = Infinity;
+    points.forEach((p, i) => {
+      const diff = Math.abs(new Date(p.date.slice(0, 10)).getTime() - new Date(artDate).getTime());
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx !== -1 && bestDiff <= 2 * 24 * 60 * 60000) {
+      byIndex[bestIdx] = (byIndex[bestIdx] || 0) + 1;
+    }
+  });
+  return Object.keys(byIndex).map(idx => ({ index: parseInt(idx, 10), count: byIndex[idx] }));
+}
+
+function toggleMagazine() {
+  showMagazine = !showMagazine;
+  if (showMagazine && !isMagazineFresh()) {
+    fetchMagazineFeed();
+  } else {
+    render();
   }
 }
 
@@ -816,6 +888,7 @@ function openHistory(symbol) {
   selectedRange = "3M";
   showNews = false;
   showRecalls = false;
+  showMagazine = false;
   render();
   if (!isHistoryFresh(symbol, "3M")) {
     enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
@@ -826,6 +899,7 @@ function closeHistory() {
   selected = null;
   showNews = false;
   showRecalls = false;
+  showMagazine = false;
   queue = queue.filter(j => j.type !== "quote");
   render();
 }
@@ -970,6 +1044,23 @@ function drawChart(points, markers) {
           ctx.textAlign = "start";
           ctx.textBaseline = "alphabetic";
         }
+      } else if (m.kind === "magazine") {
+        const magMax = Math.max(1, ...markers.filter(mk => mk.kind === "magazine").map(mk => mk.count));
+        const radius = 3 + Math.min(m.count, 8) * 2.2;
+        const alpha = 0.35 + (m.count / magMax) * 0.55;
+        ctx.fillStyle = `rgba(37,99,235,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        if (m.count > 1) {
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold " + Math.min(11, 8 + radius * 0.3) + "px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(m.count), x, y);
+          ctx.textAlign = "start";
+          ctx.textBaseline = "alphabetic";
+        }
       } else {
         const radius = 3 + Math.min(m.count, 8) * 2.2;
         const intensity = m.count / newsMax;
@@ -1068,6 +1159,7 @@ function render() {
           <button data-range="1Y" class="${selectedRange === "1Y" ? "active" : ""}">1Y</button>
           ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
           <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
+          ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
           <button data-action="close">close</button>
         </div>
       </div>
@@ -1099,6 +1191,21 @@ function render() {
           }).join("") + `</div>`;
         }
       }
+      if (showMagazine) {
+        if (!magazineCache) {
+          inner += `<div class="newsPanel"><p class="newsStatus">loading QSR Magazine feed</p></div>`;
+        } else {
+          const matched = magazineArticlesFor(sym);
+          if (matched.length === 0) {
+            inner += `<div class="newsPanel"><p class="newsStatus">no recent QSR Magazine articles mention this chain, feed only covers roughly the last day or two of stories</p></div>`;
+          } else {
+            inner += `<div class="newsPanel">` + matched.map(a => {
+              const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
+              return `<div class="newsItem"><div class="newsDate">${d} &middot; QSR Magazine</div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
+            }).join("") + `</div>`;
+          }
+        }
+      }
     }
     card.innerHTML = inner;
     const rmBtn = card.querySelector(".rm");
@@ -1115,6 +1222,8 @@ function render() {
       if (newsBtn) newsBtn.onclick = (e) => { e.stopPropagation(); toggleNews(); };
       const recallsBtn = card.querySelector('[data-action="recalls"]');
       if (recallsBtn) recallsBtn.onclick = (e) => { e.stopPropagation(); toggleRecalls(); };
+      const magBtn = card.querySelector('[data-action="magazine"]');
+      if (magBtn) magBtn.onclick = (e) => { e.stopPropagation(); toggleMagazine(); };
     }
     gridEl.appendChild(card);
   });
@@ -1123,7 +1232,8 @@ function render() {
     if (points) {
       const newsMarks = (selectedRange === "1M" && showNews) ? newsMarkersFor(selected, points) : [];
       const recallMarks = showRecalls ? recallMarkersFor(selected, points) : [];
-      const markers = newsMarks.map(m => ({ ...m, kind: "news" })).concat(recallMarks.map(m => ({ ...m, kind: "recall" })));
+      const magMarks = showMagazine ? magazineMarkersFor(selected, points) : [];
+      const markers = newsMarks.map(m => ({ ...m, kind: "news" })).concat(recallMarks.map(m => ({ ...m, kind: "recall" }))).concat(magMarks.map(m => ({ ...m, kind: "magazine" })));
       requestAnimationFrame(() => drawChart(points, markers));
     }
   }
