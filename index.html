@@ -104,11 +104,37 @@
 <body>
 
 <div id="setup">
-  <h1>stock tracker setup</h1>
+  <div class="headrow" style="margin-bottom:14px;">
+    <button class="hamburger" id="infoBtnSetup" title="about this app">&#9432;</button>
+    <h1 style="margin:0;">stock tracker setup</h1>
+  </div>
   <p>enter one or more free twelve data api keys, one per line. each key gets its own 8 requests per minute allowance, more keys means faster refresh across your ticker list.</p>
   <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
   <button class="primary" id="saveKeyBtn">save keys and continue</button>
   <p style="font-size:11px;color:#9ca3af;">sign up at twelvedata.com, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
+  <p style="font-size:11px;color:#9ca3af;">tap the info button above before entering anything if you want to know what this app does and how it handles your keys first</p>
+</div>
+
+<div id="infoOverlay">
+  <div id="infoPanel">
+    <div class="info-header">
+      <h3 style="margin:0;font-size:14px;">about this app</h3>
+      <button id="closeInfoBtn">close</button>
+    </div>
+    <div id="infoText">
+      <p>This is a quick service restaurant stock tracker. Before anything else works it needs at least one free api key from Twelve Data, which is what supplies live prices and price history. Sign up at twelvedata.com, copy the key from your dashboard, and paste it into the box on the setup screen, one key per line if you have more than one. Nothing else is required to get started. Three more services are optional and only unlock specific extras later, Alpha Vantage as a backup price source, and Finnhub or GNews to power the news button. All four are added the same way once the app is running, through one paste a key box in the hamburger menu, which tests whatever you paste and files it under the right service automatically.</p>
+      <p>On how keys are handled. Every key you enter is stored only in this browser's own local storage on this specific device, the same private storage a site uses to remember a login or a shopping cart. Keys are never sent to any server this app controls, because there is no server, this is a static page with no backend at all. Each key is used only to talk directly from your browser to the provider it belongs to, Twelve Data, Alpha Vantage, Finnhub, or GNews, exactly the same as if you had typed that request into their own website yourself. Anywhere a stored key is shown on screen it is masked down to its last four characters. The export feature elsewhere in the app, which lets you save your ticker list and cached data to a file, deliberately never includes api keys in that file, so a shared or backed up export can never leak a live key.</p>
+      <p>This is a quick service restaurant stock tracker. It pulls live and historical price data for 52 publicly traded companies, the core fast food and fast casual chains, the casual dining names that trade alongside them, and the supply chain and restaurant technology companies that sit behind the whole industry, McDonald's, Yum Brands, Chipotle, Sysco, Toast, and the rest.</p>
+      <p>The focus is restaurants and the businesses that feed them, rather than the whole market, because restaurant operations, unit economics, franchise structures, and food supply chains are a domain this was built with real working knowledge of. Narrowing the scope means the patterns on screen mean something instead of being noise pulled from an unrelated sector.</p>
+      <p>Each tile shows the current price, the change for the day, a small dot for whether that price is fresh from the api or loaded from the browser cache, and a faint background color. Open the hamburger menu and pick week, month, or year to set what that color compares against. Green means the current price sits meaningfully below that average, red means meaningfully above, gray means it is sitting close to normal. It is a cheap or expensive signal relative to the stock's own recent history, not a buy or sell call.</p>
+      <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. A slider below the range buttons lets you scrub back through earlier periods of the same size, current period on the right, drag left to go back. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
+      <p>Three buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news.</p>
+      <p>Next to the historical label sits a green and red number pair. That is a simple keyword count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, and recall data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent coverage leans one way or the other, not a signal to act on by itself.</p>
+      <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
+      <p>The hamburger menu also holds sort and filter options for the grid, an export and import feature for everything the app has cached, and this same info panel, which includes a read aloud button using your browser's own built in speech feature.</p>
+    </div>
+    <button id="readAloudBtn">read aloud</button>
+  </div>
 </div>
 
 <div class="wrap" id="app" style="display:none;">
@@ -155,26 +181,6 @@
         </div>
         <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, finnhub, or gnews key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, finnhub and gnews power the 1M news button. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
-    </div>
-  </div>
-
-  <div id="infoOverlay">
-    <div id="infoPanel">
-      <div class="info-header">
-        <h3 style="margin:0;font-size:14px;">about this app</h3>
-        <button id="closeInfoBtn">close</button>
-      </div>
-      <div id="infoText">
-        <p>This is a quick service restaurant stock tracker. It pulls live and historical price data for 52 publicly traded companies, the core fast food and fast casual chains, the casual dining names that trade alongside them, and the supply chain and restaurant technology companies that sit behind the whole industry, McDonald's, Yum Brands, Chipotle, Sysco, Toast, and the rest.</p>
-        <p>The focus is restaurants and the businesses that feed them, rather than the whole market, because restaurant operations, unit economics, franchise structures, and food supply chains are a domain this was built with real working knowledge of. Narrowing the scope means the patterns on screen mean something instead of being noise pulled from an unrelated sector.</p>
-        <p>Each tile shows the current price, the change for the day, a small dot for whether that price is fresh from the api or loaded from the browser cache, and a faint background color. Open the hamburger menu and pick week, month, or year to set what that color compares against. Green means the current price sits meaningfully below that average, red means meaningfully above, gray means it is sitting close to normal. It is a cheap or expensive signal relative to the stock's own recent history, not a buy or sell call.</p>
-        <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
-        <p>Two buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a purple dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, so a story covered everywhere stands out from a single mention. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one.</p>
-        <p>Next to the historical label sits a green and red number pair. That is a simple keyword count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, and recall data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent coverage leans one way or the other, not a signal to act on by itself.</p>
-        <p>Api keys are entered through the hamburger menu, one box, paste any key from twelve data, finnhub, or gnews and it gets tested against all three and filed under whichever one it belongs to automatically. Multiple keys of the same kind rotate on every request, which raises the effective rate limit and spreads usage so no single key gets burned down. Stored keys only ever show their last four characters.</p>
-        <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
-      </div>
-      <button id="readAloudBtn">read aloud</button>
     </div>
   </div>
 
@@ -332,6 +338,13 @@ infoBtn.onclick = (e) => {
   e.stopPropagation();
   infoOverlay.classList.add("open");
 };
+const infoBtnSetup = document.getElementById("infoBtnSetup");
+if (infoBtnSetup) {
+  infoBtnSetup.onclick = (e) => {
+    e.stopPropagation();
+    infoOverlay.classList.add("open");
+  };
+}
 closeInfoBtn.onclick = () => {
   infoOverlay.classList.remove("open");
   stopReading();
@@ -1445,7 +1458,7 @@ function render() {
         const rangeLabel = selectedRange === "1D" ? "day" : selectedRange === "1W" ? "week" : selectedRange === "1M" ? "month" : "quarter";
         const offsetLabel = curOff === 0 ? "current " + rangeLabel : curOff + " " + rangeLabel + (curOff > 1 ? "s" : "") + " back";
         inner += `<div class="sliderRow">
-          <input type="range" class="periodSlider" min="0" max="${maxOff}" value="${curOff}" ${maxOff === 0 ? "disabled" : ""}>
+          <input type="range" class="periodSlider" min="0" max="${maxOff}" value="${maxOff - curOff}" ${maxOff === 0 ? "disabled" : ""}>
           <span class="sliderLabel">${maxOff === 0 ? "no earlier data cached yet" : offsetLabel}</span>
         </div>`;
       }
@@ -1516,7 +1529,7 @@ function render() {
       const slider = card.querySelector('.periodSlider');
       if (slider) {
         slider.oninput = (e) => { e.stopPropagation(); };
-        slider.onchange = (e) => { e.stopPropagation(); setRangeOffset(selectedRange, parseInt(e.target.value, 10)); };
+        slider.onchange = (e) => { e.stopPropagation(); const max = parseInt(e.target.max, 10); setRangeOffset(selectedRange, max - parseInt(e.target.value, 10)); };
       }
     }
     gridEl.appendChild(card);
