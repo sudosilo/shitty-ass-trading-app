@@ -929,7 +929,7 @@ function isSecFilingsFresh(symbol) {
 }
 
 async function ensureSecCikMap() {
-  if (secCikMap && Date.now() - secCikMap.fetchedAt < SEC_CIK_TTL_MS) return secCikMap.tickers;
+  if (secCikMap && Date.now() - secCikMap.fetchedAt < SEC_CIK_TTL_MS && Object.keys(secCikMap.tickers).length >= 10) return secCikMap.tickers;
   statusEl.textContent = "resolving SEC CIK numbers";
   try {
     const url = SEC_CORS_PROXY + encodeURIComponent("https://www.sec.gov/files/company_tickers.json");
@@ -937,11 +937,18 @@ async function ensureSecCikMap() {
     const data = await res.json();
     const tickers = {};
     Object.values(data).forEach(row => {
+      if (!row || typeof row !== "object") return;
       const t = (row.ticker || "").toUpperCase();
-      if (DEFAULT_TICKERS.includes(t)) tickers[t] = String(row.cik_str).padStart(10, "0");
+      if (DEFAULT_TICKERS.includes(t) && row.cik_str) tickers[t] = String(row.cik_str).padStart(10, "0");
     });
+    const resolvedCount = Object.keys(tickers).length;
+    if (resolvedCount < 10) {
+      statusEl.textContent = "SEC ticker lookup returned too little data, probably the proxy choked on the file size, will retry next time instead of caching this";
+      return secCikMap ? secCikMap.tickers : {};
+    }
     secCikMap = { tickers: tickers, fetchedAt: Date.now() };
     saveSecCikMap();
+    statusEl.textContent = "resolved SEC CIK numbers for " + resolvedCount + " tickers";
     return tickers;
   } catch (e) {
     statusEl.textContent = "could not resolve SEC CIK numbers right now";
