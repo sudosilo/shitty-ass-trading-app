@@ -46,6 +46,10 @@
   .articleTag.positive { background: rgba(22,163,74,0.12); color: #16a34a; }
   .articleTag.negative { background: rgba(220,38,38,0.12); color: #dc2626; }
   .articleTag.neutral { background: rgba(107,114,128,0.12); color: #6b7280; }
+  .lagTag { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+  .lagTag.leading { background: rgba(37,99,235,0.12); color: #2563eb; }
+  .lagTag.reactive { background: rgba(107,114,128,0.15); color: #4b5563; }
+  .lagTag.none { background: rgba(107,114,128,0.08); color: #9ca3af; }
   .headrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; position: relative; }
   .hamburger { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; cursor: pointer; }
   #blockMenu { display: none; position: absolute; top: 38px; left: 0; z-index: 10; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; width: min(320px, 88vw); max-height: 80vh; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -130,6 +134,7 @@
       <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. A slider below the range buttons lets you scrub back through earlier periods of the same size, current period on the right, drag left to go back. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
       <p>Three buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news.</p>
       <p>Next to the historical label sits a green and red number pair. That is a simple keyword count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, and recall data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent coverage leans one way or the other, not a signal to act on by itself.</p>
+      <p>Each news headline in the one month view can also carry a second small tag showing leading or reactive. This checks five minute price data around the article's publish time, out to an hour before and after, for a move bigger than that stock's own typical five minute swing, and reports whether the move happened before the article posted or after it. Leading means the price had already started moving before the story came out, reactive means the move came after. This only works for articles that fall inside whatever intraday history is currently cached for that ticker, usually the last several trading days, so older articles will show no intraday data cached rather than a guess, and a quiet stretch with no real move shows no measurable move. None of this proves the article caused anything, it only measures timing against price.</p>
       <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
       <p>The hamburger menu also holds sort and filter options for the grid, an export and import feature for everything the app has cached, and this same info panel, which includes a read aloud button using your browser's own built in speech feature.</p>
     </div>
@@ -770,7 +775,9 @@ async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
     const trimmed = points.slice(-capSize);
     history[symbol + "_" + apiRange] = { points: trimmed, fetchedAt: Date.now(), source: "live" };
     saveHistoryCache();
-    if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+    const lagRefreshNeeded = apiRange === "1D" && selected === symbol && showNews;
+    if (lagRefreshNeeded && newsCache[symbol]) ensureLagComputed(symbol);
+    if (lagRefreshNeeded || (selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
       render();
     }
   } catch (e) {
@@ -784,7 +791,7 @@ async function fetchHistory(symbol, uiRange, keyObj) {
   const apiRange = apiRangeFor(uiRange);
   const cfg = API_RANGE_MAP[apiRange];
   try {
-    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${cfg.interval}&outputsize=${cfg.size}&apikey=${key}`);
+    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
     const data = await res.json();
     if (data.status === "error" || !data.values) {
       statusEl.textContent = symbol + " history: " + (data.message || "error");
@@ -793,7 +800,9 @@ async function fetchHistory(symbol, uiRange, keyObj) {
     const points = data.values.map(v => ({ date: v.datetime, close: parseFloat(v.close) })).reverse();
     history[symbol + "_" + apiRange] = { points: points, fetchedAt: Date.now(), source: "live" };
     saveHistoryCache();
-    if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+    const lagRefreshNeeded = apiRange === "1D" && selected === symbol && showNews;
+    if (lagRefreshNeeded && newsCache[symbol]) ensureLagComputed(symbol);
+    if (lagRefreshNeeded || (selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
       render();
     }
   } catch (e) {
@@ -1072,6 +1081,81 @@ function recallMarkersFor(symbol, points) {
   return Object.keys(byIndex).map(idx => ({ index: parseInt(idx, 10), count: byIndex[idx].count, classification: byIndex[idx].worst }));
 }
 
+const LAG_WINDOW_MIN = 60;
+const LAG_THRESHOLD_FLOOR = 0.3;
+let lagCache = JSON.parse(localStorage.getItem("st_lag_cache") || "null") || {};
+function saveLagCache() {
+  try { localStorage.setItem("st_lag_cache", JSON.stringify(lagCache)); } catch (e) {}
+}
+
+function baselineVolatility(points) {
+  if (!points || points.length < 2) return LAG_THRESHOLD_FLOOR;
+  let sum = 0, n = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i - 1].close <= 0) continue;
+    sum += Math.abs((points[i].close - points[i - 1].close) / points[i - 1].close) * 100;
+    n++;
+  }
+  return n > 0 ? sum / n : LAG_THRESHOLD_FLOOR;
+}
+
+function computeLagForArticle(articleTimestampSec, points) {
+  if (!points || points.length < 3) return { label: "no intraday data cached" };
+  const barTimes = points.map(p => new Date(p.date.replace(" ", "T") + "Z").getTime());
+  const earliest = barTimes[0], latest = barTimes[barTimes.length - 1];
+  const artMs = articleTimestampSec * 1000;
+  if (artMs < earliest || artMs > latest) return { label: "outside cached intraday window" };
+
+  let baseIdx = 0, baseDiff = Infinity;
+  barTimes.forEach((t, i) => {
+    const diff = Math.abs(t - artMs);
+    if (diff < baseDiff) { baseDiff = diff; baseIdx = i; }
+  });
+  const basePrice = points[baseIdx].close;
+  const windowMs = LAG_WINDOW_MIN * 60000;
+  const threshold = Math.max(LAG_THRESHOLD_FLOOR, baselineVolatility(points) * 2);
+
+  let best = null;
+  for (let i = 0; i < points.length; i++) {
+    const dt = barTimes[i] - artMs;
+    if (Math.abs(dt) > windowMs) continue;
+    const pct = ((points[i].close - basePrice) / basePrice) * 100;
+    if (Math.abs(pct) >= threshold) {
+      if (!best || Math.abs(dt) < Math.abs(best.deltaMs)) {
+        best = { deltaMs: dt, pct: pct };
+      }
+    }
+  }
+  if (!best) return { label: "no measurable move", moveTimestamp: null, deltaSeconds: null, magnitudePercent: null };
+  const deltaSeconds = Math.round(best.deltaMs / 1000);
+  const label = deltaSeconds < 0 ? "leading" : "reactive";
+  return { label: label, deltaSeconds: deltaSeconds, magnitudePercent: Math.round(best.pct * 100) / 100 };
+}
+
+function ensureLagComputed(symbol) {
+  const n = newsCache[symbol];
+  if (!n) return;
+  const h = history[symbol + "_1D"];
+  if (!h) {
+    enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "1D", k) });
+    return;
+  }
+  if (!lagCache[symbol]) lagCache[symbol] = {};
+  let changed = false;
+  n.articles.forEach(a => {
+    const key = a.headline + "|" + a.timestamp;
+    if (lagCache[symbol][key]) return;
+    lagCache[symbol][key] = computeLagForArticle(a.timestamp, h.points);
+    changed = true;
+  });
+  if (changed) saveLagCache();
+}
+
+function lagResultFor(symbol, article) {
+  const key = article.headline + "|" + article.timestamp;
+  return (lagCache[symbol] && lagCache[symbol][key]) || null;
+}
+
 function isNewsFresh(symbol) {
   const n = newsCache[symbol];
   return n && Date.now() - n.fetchedAt < NEWS_TTL_MS;
@@ -1119,6 +1203,7 @@ async function fetchNews(symbol) {
   newsCache[symbol] = { articles: combined, fetchedAt: Date.now() };
   saveNewsCache();
   statusEl.textContent = combined.length + " articles found";
+  ensureLagComputed(symbol);
   render();
 }
 
@@ -1127,6 +1212,7 @@ function toggleNews() {
   if (showNews && !isNewsFresh(selected)) {
     fetchNews(selected);
   } else {
+    if (showNews) ensureLagComputed(selected);
     render();
   }
 }
@@ -1408,7 +1494,7 @@ function render() {
     }
     const recallSeverity = hasRecentRecall(sym);
     const recallBadge = recallSeverity ? `<span class="dot" style="background:${recallSeverity === "Class I" ? "#dc2626" : recallSeverity === "Class II" ? "#f97316" : "#eab308"};border:none;" title="recent recall"></span>` : "";
-    let inner = `<div class="top"><span class="sym">${sym}${recallBadge}</span>${isSelected ? "" : '<button class="rm">remove</button>'}</div>`;
+    let inner = `<div class="top"><span class="sym">${sym}${recallBadge}</span>${isSelected ? '<button data-action="close" class="rm">close</button>' : '<button class="rm">remove</button>'}</div>`;
     if (q) {
       const up = q.change >= 0;
       const dotClass = q.source === "live" ? "live" : "cache";
@@ -1443,10 +1529,11 @@ function render() {
           <button data-range="1M" class="${selectedRange === "1M" ? "active" : ""}">1M</button>
           <button data-range="3M" class="${selectedRange === "3M" ? "active" : ""}">3M</button>
           <button data-range="1Y" class="${selectedRange === "1Y" ? "active" : ""}">1Y</button>
+        </div>
+        <div class="ranges">
           ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
           <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
           ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
-          <button data-action="close">close</button>
         </div>
       </div>
       <canvas id="chart" width="1000" height="220"></canvas>`;
@@ -1473,7 +1560,17 @@ function render() {
             const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
             const c = classifyArticleText(a.headline);
             const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
-            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.source} via ${a.origin} <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.headline}</div></div>`;
+            const lag = lagResultFor(sym, a);
+            let lagHtml = "";
+            if (lag) {
+              if (lag.label === "leading" || lag.label === "reactive") {
+                const mins = Math.round(Math.abs(lag.deltaSeconds) / 60);
+                lagHtml = `<span class="lagTag ${lag.label}">${lag.label}, ${mins}m ${lag.label === "leading" ? "before" : "after"}, ${lag.magnitudePercent > 0 ? "+" : ""}${lag.magnitudePercent}%</span>`;
+              } else {
+                lagHtml = `<span class="lagTag none">${lag.label}</span>`;
+              }
+            }
+            return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.source} via ${a.origin} <span class="articleTag ${c.verdict}">${tagLabel}</span> ${lagHtml}</div><div class="newsHeadline">${a.headline}</div></div>`;
           }).join("") + `</div>`;
         }
       }
@@ -1510,7 +1607,7 @@ function render() {
       }
     }
     card.innerHTML = inner;
-    const rmBtn = card.querySelector(".rm");
+    const rmBtn = card.querySelector('.rm:not([data-action="close"])');
     if (rmBtn) rmBtn.onclick = (e) => { e.stopPropagation(); removeTicker(sym); };
     card.querySelectorAll(".dp").forEach(btn => {
       btn.onclick = (e) => { e.stopPropagation(); moveTicker(sym, btn.dataset.dir); };
