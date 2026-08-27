@@ -186,7 +186,7 @@
           <input id="addKeyInput" type="text" placeholder="paste any api key">
           <button id="addKeyBtn">add</button>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, finnhub, or gnews key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, finnhub and gnews power the 1M news button. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, tiingo, finnhub, or gnews key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -204,7 +204,7 @@
 const DEFAULT_TICKERS = ["MCD","YUM","SBUX","CMG","QSR","WEN","DPZ","JACK","PZZA","SHAK","WING","LOCO","ARCO","BROS","PTLO","NATH","CAVA","FRGI","NDLS","YUMC","DNUT","DENN","PBPB","CHUY","SG","KRUS","FAT","BFI","GTIM","TAST","CBRL","TXRH","CAKE","DRI","EAT","BLMN","DIN","FWRG","SYY","USFD","PFGC","ARMK","ECL","MIDD","CTAS","KO","KDP","PEP","TOST","PAR","VYX","XYZ"];
 const TICKER_SET_VERSION = "qsr3";
 const KEY_COOLDOWN_MS = 7600;
-const PROVIDER_COOLDOWN_MS = { twelvedata: 7600, alphavantage: 12500 };
+const PROVIDER_COOLDOWN_MS = { twelvedata: 7600, alphavantage: 12500, tiingo: 7600 };
 const ALPHA_VANTAGE_DAILY_CAP = 25;
 const QUOTE_TTL_MS = 45000;
 const HISTORY_TTL_MS = { "1D": 5 * 60000, "1W": 60 * 60000, "DAILY": 24 * 60 * 60000 };
@@ -559,6 +559,20 @@ async function detectAndAddKey(raw) {
   } catch (e) {}
 
   try {
+    const r = await fetch(`https://api.tiingo.com/tiingo/daily/aapl?token=${raw}`);
+    const d = await r.json();
+    if (d && d.ticker) {
+      if (!keys.some(k => k.provider === "tiingo" && k.key === raw)) {
+        keys.push({ provider: "tiingo", key: raw });
+        saveKeysArray();
+      }
+      renderKeys();
+      statusEl.textContent = "added as a tiingo key, end of day history only, no live quotes";
+      return;
+    }
+  } catch (e) {}
+
+  try {
     const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`);
     const d = await r.json();
     if (d && typeof d.c === "number" && d.c > 0) {
@@ -586,7 +600,7 @@ async function detectAndAddKey(raw) {
     }
   } catch (e) {}
 
-  statusEl.textContent = "key not recognized by twelve data, alpha vantage, finnhub, or gnews";
+  statusEl.textContent = "key not recognized by twelve data, alpha vantage, tiingo, finnhub, or gnews";
 }
 
 document.getElementById("addKeyBtn").onclick = () => {
@@ -633,7 +647,7 @@ function renderKeys() {
   keys.forEach(k => {
     const row = document.createElement("div");
     row.className = "keyrow";
-    const label = k.provider === "alphavantage" ? "alpha vantage" : "twelve data";
+    const label = k.provider === "alphavantage" ? "alpha vantage" : k.provider === "tiingo" ? "tiingo" : "twelve data";
     const extra = k.provider === "alphavantage" ? ` (${alphaVantageCallsLeft(k.key)} left today)` : "";
     row.innerHTML = `<span class="keylabel">${label}</span><span>${maskKey(k.key)}${extra}</span>`;
     const rm = document.createElement("button");
@@ -701,6 +715,7 @@ setInterval(() => {
 
 async function fetchQuote(symbol, keyObj) {
   if (keyObj.provider === "alphavantage") return fetchQuoteAlphaVantage(symbol, keyObj.key);
+  if (keyObj.provider === "tiingo") return;
   const key = keyObj.key;
   try {
     const res = await fetch(`https://api.twelvedata.com/quote?symbol=${symbol}&apikey=${key}`);
@@ -818,8 +833,33 @@ async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
   }
 }
 
+async function fetchHistoryTiingo(symbol, uiRange, key) {
+  const apiRange = apiRangeFor(uiRange);
+  if (apiRange !== "DAILY") return;
+  try {
+    const start = new Date();
+    start.setDate(start.getDate() - 400);
+    const startDate = start.toISOString().slice(0, 10);
+    const res = await fetch(`https://api.tiingo.com/tiingo/daily/${symbol}/prices?token=${key}&startDate=${startDate}`);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      statusEl.textContent = symbol + " history (tiingo): " + (data.detail || "no data");
+      return;
+    }
+    const points = data.map(d => ({ date: d.date.slice(0, 10), close: parseFloat(d.close) })).slice(-260);
+    history[symbol + "_" + apiRange] = { points: points, fetchedAt: Date.now(), source: "live" };
+    saveHistoryCache();
+    if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+      render();
+    }
+  } catch (e) {
+    statusEl.textContent = symbol + " history (tiingo): request failed";
+  }
+}
+
 async function fetchHistory(symbol, uiRange, keyObj) {
   if (keyObj.provider === "alphavantage") return fetchHistoryAlphaVantage(symbol, uiRange, keyObj.key);
+  if (keyObj.provider === "tiingo") return fetchHistoryTiingo(symbol, uiRange, keyObj.key);
   const key = keyObj.key;
   const apiRange = apiRangeFor(uiRange);
   const cfg = API_RANGE_MAP[apiRange];
