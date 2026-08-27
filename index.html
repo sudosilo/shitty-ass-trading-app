@@ -75,7 +75,7 @@
   #readAloudBtn { width: 100%; padding: 8px; font-size: 12px; }
   .card .expandHead { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; margin-bottom: 8px; }
   .expandHead { flex-wrap: wrap; }
-  .ranges { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ranges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .ranges button { font-size: 11px; padding: 4px 8px; margin-left: 0; }
   .ranges button.active { border-color: #111827; color: #111827; }
   canvas { width: 100%; height: 220px; display: block; }
@@ -1780,20 +1780,20 @@ function render() {
           <span class="sentimentBadge pos">+${sentiment.positive}</span>
           <span class="sentimentBadge neg">-${sentiment.negative}</span>
         </span>
-        <div class="ranges">
-          <button data-range="1D" class="${selectedRange === "1D" ? "active" : ""}">1D</button>
-          <button data-range="1W" class="${selectedRange === "1W" ? "active" : ""}">1W</button>
-          <button data-range="1M" class="${selectedRange === "1M" ? "active" : ""}">1M</button>
-          <button data-range="3M" class="${selectedRange === "3M" ? "active" : ""}">3M</button>
-          <button data-range="1Y" class="${selectedRange === "1Y" ? "active" : ""}">1Y</button>
-        </div>
-        <div class="ranges">
-          ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
-          <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
-          ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
-          <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
-          ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
-        </div>
+      </div>
+      <div class="ranges">
+        <button data-range="1D" class="${selectedRange === "1D" ? "active" : ""}">1D</button>
+        <button data-range="1W" class="${selectedRange === "1W" ? "active" : ""}">1W</button>
+        <button data-range="1M" class="${selectedRange === "1M" ? "active" : ""}">1M</button>
+        <button data-range="3M" class="${selectedRange === "3M" ? "active" : ""}">3M</button>
+        <button data-range="1Y" class="${selectedRange === "1Y" ? "active" : ""}">1Y</button>
+      </div>
+      <div class="ranges">
+        ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
+        <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
+        ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
+        <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
+        ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
       </div>
       <canvas id="chart" width="1000" height="220"></canvas>`;
       if (RANGE_WINDOW_SIZE[selectedRange]) {
