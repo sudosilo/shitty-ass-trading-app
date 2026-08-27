@@ -578,7 +578,7 @@ const PROVIDER_DEFS = {
   },
   fmp: {
     label: "fmp",
-    test: (raw) => fetch(`https://financialmodelingprep.com/api/v3/quote/AAPL?apikey=${raw}`).then(r => r.json()),
+    test: (raw) => fetch(`https://financialmodelingprep.com/stable/quote?symbol=AAPL&apikey=${raw}`).then(r => r.json()),
     isValid: (d) => Array.isArray(d) && d.length > 0 && d[0].symbol === "AAPL",
     add: (raw) => { if (!fmpKeys.includes(raw)) { fmpKeys.push(raw); localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys)); } }
   }
