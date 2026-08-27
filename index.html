@@ -606,9 +606,9 @@ async function detectAndAddKey(raw) {
   } catch (e) {}
 
   try {
-    const r = await fetch(`https://financialmodelingprep.com/stable/sec-filings-search/symbol?symbol=AAPL&formType=10-K&page=0&limit=1&apikey=${raw}`);
+    const r = await fetch(`https://financialmodelingprep.com/api/v3/quote/AAPL?apikey=${raw}`);
     const d = await r.json();
-    if (Array.isArray(d) && d.length > 0 && !d[0]["Error Message"]) {
+    if (Array.isArray(d) && d.length > 0 && d[0].symbol === "AAPL") {
       if (!fmpKeys.includes(raw)) {
         fmpKeys.push(raw);
         localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
