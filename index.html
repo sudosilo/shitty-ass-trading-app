@@ -998,11 +998,12 @@ function isTariffsFresh() {
 async function fetchTariffWatch() {
   statusEl.textContent = "checking federal register for tariff notices";
   try {
-    const url = "https://www.federalregister.gov/api/v1/documents.json?conditions%5Bterm%5D=tariff&order=newest&per_page=40&fields%5B%5D=title&fields%5B%5D=abstract&fields%5B%5D=publication_date&fields%5B%5D=agencies&fields%5B%5D=document_number&fields%5B%5D=type";
+    const targetUrl = "https://www.federalregister.gov/api/v1/documents.json?conditions%5Bterm%5D=tariff&order=newest&per_page=40&fields%5B%5D=title&fields%5B%5D=abstract&fields%5B%5D=publication_date&fields%5B%5D=agencies&fields%5B%5D=document_number&fields%5B%5D=type";
+    const url = "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl);
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.results) {
-      statusEl.textContent = "federal register lookup returned nothing usable";
+    if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
+      statusEl.textContent = "federal register lookup returned nothing usable, not caching this attempt";
       return;
     }
     const docs = data.results.map(d => ({
