@@ -567,22 +567,6 @@ async function detectAndAddKey(raw) {
   } catch (e) {}
 
   try {
-    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
-    const d = await r.json();
-    const gq = d && d["Global Quote"];
-    const looksLikeRealAV = gq && gq["05. price"] && gq["01. symbol"] === "AAPL" && gq["07. latest trading day"] && !d.ticker;
-    if (looksLikeRealAV) {
-      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
-        keys.push({ provider: "alphavantage", key: raw });
-        saveKeysArray();
-      }
-      renderKeys();
-      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
-      return;
-    }
-  } catch (e) {}
-
-  try {
     const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`);
     const d = await r.json();
     if (d && typeof d.c === "number" && d.c > 0) {
@@ -620,6 +604,22 @@ async function detectAndAddKey(raw) {
       }
       renderKeys();
       statusEl.textContent = "added as an fmp key, used for 10-K and 20-F filings";
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
+    const d = await r.json();
+    const gq = d && d["Global Quote"];
+    const looksLikeRealAV = gq && gq["05. price"] && gq["01. symbol"] === "AAPL" && gq["07. latest trading day"];
+    if (looksLikeRealAV) {
+      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
+        keys.push({ provider: "alphavantage", key: raw });
+        saveKeysArray();
+      }
+      renderKeys();
+      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
       return;
     }
   } catch (e) {}
