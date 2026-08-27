@@ -190,6 +190,7 @@
           <input type="checkbox" id="isAlphaVantageCheck" style="width:auto;">
           this key is for alpha vantage specifically
         </label>
+        <p id="keyStatusText" style="font-size:11px;color:#111827;font-weight:500;margin:8px 0 0 0;min-height:14px;"></p>
         <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, tiingo, finnhub, gnews, or fmp key and hit add, it gets tested and filed automatically. alpha vantage is not auto-detected, its own api accepts almost any string without real validation, so check the box above first if this key is one of those. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
@@ -538,9 +539,15 @@ document.getElementById("saveKeyBtn").onclick = () => {
   boot();
 };
 
+function setKeyStatus(msg) {
+  statusEl.textContent = msg;
+  const el = document.getElementById("keyStatusText");
+  if (el) el.textContent = msg;
+}
+
 async function detectAndAddKey(raw) {
   if (!raw) return;
-  statusEl.textContent = "checking key...";
+  setKeyStatus("checking key...");
 
   try {
     const r = await fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`);
@@ -551,7 +558,7 @@ async function detectAndAddKey(raw) {
         saveKeysArray();
       }
       renderKeys();
-      statusEl.textContent = "added as a twelve data key";
+      setKeyStatus("added as a twelve data key");
       return;
     }
   } catch (e) {}
@@ -565,7 +572,7 @@ async function detectAndAddKey(raw) {
         saveKeysArray();
       }
       renderKeys();
-      statusEl.textContent = "added as a tiingo key, end of day history only, no live quotes";
+      setKeyStatus("added as a tiingo key, end of day history only, no live quotes");
       return;
     }
   } catch (e) {}
@@ -579,7 +586,7 @@ async function detectAndAddKey(raw) {
         localStorage.setItem("st_finnhub_keys", JSON.stringify(finnhubKeys));
       }
       renderKeys();
-      statusEl.textContent = "added as a finnhub key";
+      setKeyStatus("added as a finnhub key");
       return;
     }
   } catch (e) {}
@@ -593,7 +600,7 @@ async function detectAndAddKey(raw) {
         localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys));
       }
       renderKeys();
-      statusEl.textContent = "added as a gnews key";
+      setKeyStatus("added as a gnews key");
       return;
     }
   } catch (e) {}
@@ -607,17 +614,17 @@ async function detectAndAddKey(raw) {
         localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
       }
       renderKeys();
-      statusEl.textContent = "added as an fmp key, used for 10-K and 20-F filings";
+      setKeyStatus("added as an fmp key, used for 10-K and 20-F filings");
       return;
     }
   } catch (e) {}
 
-  statusEl.textContent = "key not recognized by twelve data, tiingo, finnhub, gnews, or fmp. if this is an alpha vantage key, use the alpha vantage button instead, its own api can't be auto-detected reliably";
+  setKeyStatus("key not recognized by twelve data, tiingo, finnhub, gnews, or fmp. if this is an alpha vantage key, check the box below and hit add again");
 }
 
 async function addAlphaVantageKey(raw) {
   if (!raw) return;
-  statusEl.textContent = "checking alpha vantage key...";
+  setKeyStatus("checking alpha vantage key...");
   try {
     const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
     const d = await r.json();
@@ -628,11 +635,11 @@ async function addAlphaVantageKey(raw) {
         saveKeysArray();
       }
       renderKeys();
-      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day. note: alpha vantage's own api accepts most strings without real validation, so this only confirms the endpoint responded, not that the key is genuinely yours";
+      setKeyStatus("added as an alpha vantage key, limited to 25 lookups a day. note: alpha vantage's own api accepts most strings without real validation, so this only confirms the endpoint responded, not that the key is genuinely yours");
       return;
     }
   } catch (e) {}
-  statusEl.textContent = "alpha vantage did not return a usable response for this key";
+  setKeyStatus("alpha vantage did not return a usable response for this key");
 }
 
 document.getElementById("addKeyBtn").onclick = () => {
