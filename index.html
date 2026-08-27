@@ -668,21 +668,25 @@ document.getElementById("addBtn").onclick = () => {
 };
 
 function removeKey(k) {
+  if (!window.confirm("Remove this api key? You'll need to paste it back in to use it again.")) return;
   keys = keys.filter(x => x.key !== k);
   saveKeysArray();
   renderKeys();
 }
 function removeFinnhubKey(k) {
+  if (!window.confirm("Remove this api key? You'll need to paste it back in to use it again.")) return;
   finnhubKeys = finnhubKeys.filter(x => x !== k);
   localStorage.setItem("st_finnhub_keys", JSON.stringify(finnhubKeys));
   renderKeys();
 }
 function removeGnewsKey(k) {
+  if (!window.confirm("Remove this api key? You'll need to paste it back in to use it again.")) return;
   gnewsKeys = gnewsKeys.filter(x => x !== k);
   localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys));
   renderKeys();
 }
 function removeFmpKey(k) {
+  if (!window.confirm("Remove this api key? You'll need to paste it back in to use it again.")) return;
   fmpKeys = fmpKeys.filter(x => x !== k);
   localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
   renderKeys();
