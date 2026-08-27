@@ -910,16 +910,11 @@ function parseFDADate(d) {
   return new Date(y + "-" + m + "-" + day + "T00:00:00Z").getTime();
 }
 
-const SEC_CORS_PROXY = "https://api.allorigins.win/raw?url=";
-const SEC_CIK_TTL_MS = 7 * 24 * 60 * 60000;
+const SEC_FOREIGN_FILERS = ["ARCO", "YUMC"];
 const SEC_FILING_TTL_MS = 24 * 60 * 60000;
-let secCikMap = JSON.parse(localStorage.getItem("st_sec_cik_map") || "null") || null;
 let secFilingsCache = JSON.parse(localStorage.getItem("st_sec_filings_cache") || "null") || {};
 let showSecFilings = false;
 
-function saveSecCikMap() {
-  try { localStorage.setItem("st_sec_cik_map", JSON.stringify(secCikMap)); } catch (e) {}
-}
 function saveSecFilingsCache() {
   try { localStorage.setItem("st_sec_filings_cache", JSON.stringify(secFilingsCache)); } catch (e) {}
 }
@@ -928,67 +923,32 @@ function isSecFilingsFresh(symbol) {
   return f && Date.now() - f.fetchedAt < SEC_FILING_TTL_MS;
 }
 
-async function ensureSecCikMap() {
-  if (secCikMap && Date.now() - secCikMap.fetchedAt < SEC_CIK_TTL_MS && Object.keys(secCikMap.tickers).length >= 10) return secCikMap.tickers;
-  statusEl.textContent = "resolving SEC CIK numbers";
-  try {
-    const url = SEC_CORS_PROXY + encodeURIComponent("https://www.sec.gov/files/company_tickers.json");
-    const res = await fetch(url);
-    const data = await res.json();
-    const tickers = {};
-    Object.values(data).forEach(row => {
-      if (!row || typeof row !== "object") return;
-      const t = (row.ticker || "").toUpperCase();
-      if (DEFAULT_TICKERS.includes(t) && row.cik_str) tickers[t] = String(row.cik_str).padStart(10, "0");
-    });
-    const resolvedCount = Object.keys(tickers).length;
-    if (resolvedCount < 10) {
-      statusEl.textContent = "SEC ticker lookup returned too little data, probably the proxy choked on the file size, will retry next time instead of caching this";
-      return secCikMap ? secCikMap.tickers : {};
-    }
-    secCikMap = { tickers: tickers, fetchedAt: Date.now() };
-    saveSecCikMap();
-    statusEl.textContent = "resolved SEC CIK numbers for " + resolvedCount + " tickers";
-    return tickers;
-  } catch (e) {
-    statusEl.textContent = "could not resolve SEC CIK numbers right now";
-    return secCikMap ? secCikMap.tickers : {};
-  }
-}
-
 async function fetchSecFilings(symbol) {
   statusEl.textContent = "checking SEC EDGAR for " + symbol;
-  const tickers = await ensureSecCikMap();
-  const cik = tickers[symbol];
-  if (!cik) {
-    secFilingsCache[symbol] = { filings: [], fetchedAt: Date.now(), noCik: true };
-    saveSecFilingsCache();
-    statusEl.textContent = "no SEC CIK found for " + symbol;
-    render();
-    return;
-  }
+  const formType = SEC_FOREIGN_FILERS.includes(symbol) ? "20-F" : "10-K";
   try {
-    const url = SEC_CORS_PROXY + encodeURIComponent("https://data.sec.gov/submissions/CIK" + cik + ".json");
-    const res = await fetch(url);
+    const edgarUrl = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=" + symbol + "&type=" + formType + "&dateb=&owner=include&count=20&output=atom";
+    const proxyUrl = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(edgarUrl);
+    const res = await fetch(proxyUrl);
     const data = await res.json();
-    const recent = data.filings && data.filings.recent;
-    if (!recent) {
-      statusEl.textContent = "no filing history returned for " + symbol;
+    if (data.status !== "ok" || !Array.isArray(data.items)) {
+      secFilingsCache[symbol] = { filings: [], fetchedAt: Date.now(), noCik: true };
+      saveSecFilingsCache();
+      statusEl.textContent = "no SEC filing feed found for " + symbol;
+      render();
       return;
     }
-    const filings = [];
-    for (let i = 0; i < recent.form.length; i++) {
-      const form = recent.form[i];
-      if (form === "10-K" || form === "10-K/A" || form === "20-F" || form === "20-F/A") {
-        filings.push({
-          form: form,
-          filingDate: recent.filingDate[i],
-          reportDate: recent.reportDate[i],
-          accessionNumber: recent.accessionNumber[i],
-          timestamp: Math.floor(new Date(recent.filingDate[i] + "T00:00:00Z").getTime() / 1000)
-        });
-      }
-    }
+    const filings = data.items.map(item => {
+      const desc = (item.description || "") + " " + (item.content || "");
+      const accMatch = desc.match(/Acc-no:\s*([0-9-]+)/i);
+      const formMatch = (item.title || "").match(/(10-K\/A|10-K|20-F\/A|20-F)/i);
+      return {
+        form: formMatch ? formMatch[1].toUpperCase() : formType,
+        filingDate: (item.pubDate || "").slice(0, 10),
+        accessionNumber: accMatch ? accMatch[1] : "unknown",
+        timestamp: Math.floor(new Date(item.pubDate).getTime() / 1000)
+      };
+    }).filter(f => f.filingDate && !isNaN(f.timestamp));
     filings.sort((a, b) => b.timestamp - a.timestamp);
     secFilingsCache[symbol] = { filings: filings.slice(0, 8), fetchedAt: Date.now() };
     saveSecFilingsCache();
@@ -1772,12 +1732,12 @@ function render() {
         if (!sf) {
           inner += `<div class="newsPanel"><p class="newsStatus">checking SEC EDGAR</p></div>`;
         } else if (sf.noCik) {
-          inner += `<div class="newsPanel"><p class="newsStatus">could not resolve a SEC CIK number for ${sym}</p></div>`;
+          inner += `<div class="newsPanel"><p class="newsStatus">SEC EDGAR has no filing feed under the ticker ${sym}</p></div>`;
         } else if (sf.filings.length === 0) {
           inner += `<div class="newsPanel"><p class="newsStatus">no 10-K or 20-F filings found on record</p></div>`;
         } else {
           inner += `<div class="newsPanel">` + sf.filings.map(f => {
-            return `<div class="newsItem"><div class="newsDate">${f.filingDate} &middot; ${f.form} &middot; annual report</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">accession ${f.accessionNumber}, covering fiscal year ending ${f.reportDate || "unknown"}</div></div>`;
+            return `<div class="newsItem"><div class="newsDate">${f.filingDate} &middot; ${f.form} &middot; annual report</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">accession ${f.accessionNumber}</div></div>`;
           }).join("") + `</div>`;
         }
       }
