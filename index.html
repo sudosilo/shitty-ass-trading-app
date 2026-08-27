@@ -88,6 +88,13 @@
   #setup button { width: 100%; }
   #keysManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
   #keysManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
+  .providerRow { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-top: 1px solid #f3f4f6; }
+  .providerLabel { font-size: 12px; color: #374151; text-transform: capitalize; }
+  .plusBtn { width: 26px; height: 26px; padding: 0; font-size: 15px; line-height: 1; border-radius: 6px; }
+  .plusBtn.open { border-color: #111827; color: #111827; }
+  .providerPanel { display: flex; gap: 6px; padding: 6px 0 8px 0; }
+  .providerPanel input { flex: 1; font-size: 11px; padding: 6px 8px; }
+  .providerPanel button { font-size: 11px; padding: 6px 10px; }
   #keysManager .keyrow { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; padding: 3px 0; }
   #keysManager .keyrow span { font-size: 10px; color: #6b7280; }
   #keysManager .keyrow .keylabel { color: #374151; font-weight: 500; width: 62px; flex-shrink: 0; }
@@ -182,16 +189,9 @@
       <div id="keysManager">
         <h3>api keys (<span id="keyCount">0</span>, refresh cycle: <span id="cycleTime">-</span>)</h3>
         <div id="keyList"></div>
-        <div class="row" style="margin-bottom:6px;">
-          <input id="addKeyInput" type="text" placeholder="paste any api key">
-          <button id="addKeyBtn">add</button>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;margin-bottom:0;">
-          <input type="checkbox" id="isAlphaVantageCheck" style="width:auto;">
-          this key is for alpha vantage specifically
-        </label>
+        <div id="providerAddRows"></div>
         <p id="keyStatusText" style="font-size:11px;color:#111827;font-weight:500;margin:8px 0 0 0;min-height:14px;"></p>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, tiingo, finnhub, gnews, or fmp key and hit add, it gets tested and filed automatically. alpha vantage is not auto-detected, its own api accepts almost any string without real validation, so check the box above first if this key is one of those. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">each service has its own add button below, tap the plus, paste that provider's key, hit add. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -545,116 +545,113 @@ function setKeyStatus(msg) {
   if (el) el.textContent = msg;
 }
 
-async function detectAndAddKey(raw) {
-  if (!raw) return;
-  setKeyStatus("checking key...");
-
-  try {
-    const r = await fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`);
-    const d = await r.json();
-    if (d && d.symbol && !d.code) {
-      if (!keys.some(k => k.provider === "twelvedata" && k.key === raw)) {
-        keys.push({ provider: "twelvedata", key: raw });
-        saveKeysArray();
-      }
-      renderKeys();
-      setKeyStatus("added as a twelve data key");
-      return;
-    }
-  } catch (e) {}
-
-  try {
-    const r = await fetch(`https://api.tiingo.com/tiingo/daily/aapl?token=${raw}`);
-    const d = await r.json();
-    if (d && d.ticker) {
-      if (!keys.some(k => k.provider === "tiingo" && k.key === raw)) {
-        keys.push({ provider: "tiingo", key: raw });
-        saveKeysArray();
-      }
-      renderKeys();
-      setKeyStatus("added as a tiingo key, end of day history only, no live quotes");
-      return;
-    }
-  } catch (e) {}
-
-  try {
-    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`);
-    const d = await r.json();
-    if (d && typeof d.c === "number" && d.c > 0) {
-      if (!finnhubKeys.includes(raw)) {
-        finnhubKeys.push(raw);
-        localStorage.setItem("st_finnhub_keys", JSON.stringify(finnhubKeys));
-      }
-      renderKeys();
-      setKeyStatus("added as a finnhub key");
-      return;
-    }
-  } catch (e) {}
-
-  try {
-    const r = await fetch(`https://gnews.io/api/v4/search?q=test&max=1&token=${raw}`);
-    const d = await r.json();
-    if (d && Array.isArray(d.articles)) {
-      if (!gnewsKeys.includes(raw)) {
-        gnewsKeys.push(raw);
-        localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys));
-      }
-      renderKeys();
-      setKeyStatus("added as a gnews key");
-      return;
-    }
-  } catch (e) {}
-
-  try {
-    const r = await fetch(`https://financialmodelingprep.com/api/v3/quote/AAPL?apikey=${raw}`);
-    const d = await r.json();
-    if (Array.isArray(d) && d.length > 0 && d[0].symbol === "AAPL") {
-      if (!fmpKeys.includes(raw)) {
-        fmpKeys.push(raw);
-        localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
-      }
-      renderKeys();
-      setKeyStatus("added as an fmp key, used for 10-K and 20-F filings");
-      return;
-    }
-  } catch (e) {}
-
-  setKeyStatus("key not recognized by twelve data, tiingo, finnhub, gnews, or fmp. if this is an alpha vantage key, check the box below and hit add again");
-}
-
-async function addAlphaVantageKey(raw) {
-  if (!raw) return;
-  setKeyStatus("checking alpha vantage key...");
-  try {
-    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
-    const d = await r.json();
-    const gq = d && d["Global Quote"];
-    if (gq && gq["05. price"]) {
-      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
-        keys.push({ provider: "alphavantage", key: raw });
-        saveKeysArray();
-      }
-      renderKeys();
-      setKeyStatus("added as an alpha vantage key, limited to 25 lookups a day. note: alpha vantage's own api accepts most strings without real validation, so this only confirms the endpoint responded, not that the key is genuinely yours");
-      return;
-    }
-  } catch (e) {}
-  setKeyStatus("alpha vantage did not return a usable response for this key");
-}
-
-document.getElementById("addKeyBtn").onclick = () => {
-  const input = document.getElementById("addKeyInput");
-  const v = input.value.trim();
-  if (!v) return;
-  const isAv = document.getElementById("isAlphaVantageCheck").checked;
-  input.value = "";
-  document.getElementById("isAlphaVantageCheck").checked = false;
-  if (isAv) {
-    addAlphaVantageKey(v);
-  } else {
-    detectAndAddKey(v);
+const PROVIDER_DEFS = {
+  twelvedata: {
+    label: "twelve data",
+    test: (raw) => fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`).then(r => r.json()),
+    isValid: (d) => !!(d && d.symbol && !d.code),
+    add: (raw) => { if (!keys.some(k => k.provider === "twelvedata" && k.key === raw)) { keys.push({ provider: "twelvedata", key: raw }); saveKeysArray(); } }
+  },
+  tiingo: {
+    label: "tiingo",
+    test: (raw) => fetch(`https://api.tiingo.com/tiingo/daily/aapl?token=${raw}`).then(r => r.json()),
+    isValid: (d) => !!(d && d.ticker),
+    add: (raw) => { if (!keys.some(k => k.provider === "tiingo" && k.key === raw)) { keys.push({ provider: "tiingo", key: raw }); saveKeysArray(); } }
+  },
+  alphavantage: {
+    label: "alpha vantage",
+    test: (raw) => fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`).then(r => r.json()),
+    isValid: (d) => !!(d && d["Global Quote"] && d["Global Quote"]["05. price"]),
+    add: (raw) => { if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) { keys.push({ provider: "alphavantage", key: raw }); saveKeysArray(); } }
+  },
+  finnhub: {
+    label: "finnhub",
+    test: (raw) => fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`).then(r => r.json()),
+    isValid: (d) => !!(d && typeof d.c === "number" && d.c > 0),
+    add: (raw) => { if (!finnhubKeys.includes(raw)) { finnhubKeys.push(raw); localStorage.setItem("st_finnhub_keys", JSON.stringify(finnhubKeys)); } }
+  },
+  gnews: {
+    label: "gnews",
+    test: (raw) => fetch(`https://gnews.io/api/v4/search?q=test&max=1&token=${raw}`).then(r => r.json()),
+    isValid: (d) => !!(d && Array.isArray(d.articles)),
+    add: (raw) => { if (!gnewsKeys.includes(raw)) { gnewsKeys.push(raw); localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys)); } }
+  },
+  fmp: {
+    label: "fmp",
+    test: (raw) => fetch(`https://financialmodelingprep.com/api/v3/quote/AAPL?apikey=${raw}`).then(r => r.json()),
+    isValid: (d) => Array.isArray(d) && d.length > 0 && d[0].symbol === "AAPL",
+    add: (raw) => { if (!fmpKeys.includes(raw)) { fmpKeys.push(raw); localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys)); } }
   }
 };
+
+async function addProviderKey(providerId, raw) {
+  if (!raw) return;
+  const cfg = PROVIDER_DEFS[providerId];
+  if (!cfg) return;
+  setKeyStatus("checking " + cfg.label + " key...");
+  try {
+    const d = await cfg.test(raw);
+    if (cfg.isValid(d)) {
+      cfg.add(raw);
+      renderKeys();
+      setKeyStatus("added as a " + cfg.label + " key");
+      return;
+    }
+    let detail = "";
+    try { detail = JSON.stringify(d).slice(0, 140); } catch (e) {}
+    setKeyStatus(cfg.label + " rejected this key. raw response: " + detail);
+  } catch (e) {
+    setKeyStatus(cfg.label + " request failed: " + (e && e.message ? e.message : "network error, possibly blocked by CORS"));
+  }
+}
+
+function renderProviderAddRows() {
+  const container = document.getElementById("providerAddRows");
+  if (!container) return;
+  container.innerHTML = "";
+  Object.keys(PROVIDER_DEFS).forEach(pid => {
+    const cfg = PROVIDER_DEFS[pid];
+    const row = document.createElement("div");
+    row.className = "providerRow";
+    row.innerHTML = `<span class="providerLabel">${cfg.label}</span><button class="plusBtn" data-provider="${pid}">+</button>`;
+    container.appendChild(row);
+
+    const panel = document.createElement("div");
+    panel.className = "providerPanel";
+    panel.id = "panel-" + pid;
+    panel.style.display = "none";
+    panel.innerHTML = `<input type="text" placeholder="${cfg.label} api key"><button class="providerAddBtn" data-provider="${pid}">add</button>`;
+    container.appendChild(panel);
+  });
+
+  container.querySelectorAll(".plusBtn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const pid = btn.dataset.provider;
+      const panel = document.getElementById("panel-" + pid);
+      const opening = panel.style.display === "none";
+      container.querySelectorAll(".providerPanel").forEach(p => { p.style.display = "none"; });
+      container.querySelectorAll(".plusBtn").forEach(b => b.classList.remove("open"));
+      if (opening) {
+        panel.style.display = "flex";
+        btn.classList.add("open");
+      }
+    };
+  });
+  container.querySelectorAll(".providerAddBtn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const pid = btn.dataset.provider;
+      const panel = document.getElementById("panel-" + pid);
+      const input = panel.querySelector("input");
+      const v = input.value.trim();
+      if (!v) return;
+      input.value = "";
+      addProviderKey(pid, v);
+    };
+  });
+}
+renderProviderAddRows();
 
 document.getElementById("addBtn").onclick = () => {
   const input = document.getElementById("newTicker");
