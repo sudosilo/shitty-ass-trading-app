@@ -545,20 +545,6 @@ async function detectAndAddKey(raw) {
   } catch (e) {}
 
   try {
-    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
-    const d = await r.json();
-    if (d && d["Global Quote"] && d["Global Quote"]["05. price"]) {
-      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
-        keys.push({ provider: "alphavantage", key: raw });
-        saveKeysArray();
-      }
-      renderKeys();
-      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
-      return;
-    }
-  } catch (e) {}
-
-  try {
     const r = await fetch(`https://api.tiingo.com/tiingo/daily/aapl?token=${raw}`);
     const d = await r.json();
     if (d && d.ticker) {
@@ -568,6 +554,22 @@ async function detectAndAddKey(raw) {
       }
       renderKeys();
       statusEl.textContent = "added as a tiingo key, end of day history only, no live quotes";
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
+    const d = await r.json();
+    const gq = d && d["Global Quote"];
+    const looksLikeRealAV = gq && gq["05. price"] && gq["01. symbol"] === "AAPL" && gq["07. latest trading day"] && !d.ticker;
+    if (looksLikeRealAV) {
+      if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
+        keys.push({ provider: "alphavantage", key: raw });
+        saveKeysArray();
+      }
+      renderKeys();
+      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
       return;
     }
   } catch (e) {}
