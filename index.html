@@ -186,7 +186,7 @@
           <input id="addKeyInput" type="text" placeholder="paste any api key">
           <button id="addKeyBtn">add</button>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, tiingo, finnhub, or gnews key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, tiingo, finnhub, gnews, or fmp key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -282,8 +282,10 @@ function loadKeyArray(arrayKey, legacySingleKey) {
 }
 let finnhubKeys = loadKeyArray("st_finnhub_keys", "st_finnhub_key");
 let gnewsKeys = loadKeyArray("st_gnews_keys", "st_gnews_key");
+let fmpKeys = loadKeyArray("st_fmp_keys", "st_fmp_key");
 let finnhubRotateIdx = 0;
 let gnewsRotateIdx = 0;
+let fmpRotateIdx = 0;
 
 function nextFinnhubKey() {
   if (finnhubKeys.length === 0) return null;
@@ -295,6 +297,12 @@ function nextGnewsKey() {
   if (gnewsKeys.length === 0) return null;
   const key = gnewsKeys[gnewsRotateIdx % gnewsKeys.length];
   gnewsRotateIdx++;
+  return key;
+}
+function nextFmpKey() {
+  if (fmpKeys.length === 0) return null;
+  const key = fmpKeys[fmpRotateIdx % fmpKeys.length];
+  fmpRotateIdx++;
   return key;
 }
 
@@ -602,7 +610,21 @@ async function detectAndAddKey(raw) {
     }
   } catch (e) {}
 
-  statusEl.textContent = "key not recognized by twelve data, alpha vantage, tiingo, finnhub, or gnews";
+  try {
+    const r = await fetch(`https://financialmodelingprep.com/stable/sec-filings-search/symbol?symbol=AAPL&formType=10-K&page=0&limit=1&apikey=${raw}`);
+    const d = await r.json();
+    if (Array.isArray(d) && d.length > 0 && !d[0]["Error Message"]) {
+      if (!fmpKeys.includes(raw)) {
+        fmpKeys.push(raw);
+        localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
+      }
+      renderKeys();
+      statusEl.textContent = "added as an fmp key, used for 10-K and 20-F filings";
+      return;
+    }
+  } catch (e) {}
+
+  statusEl.textContent = "key not recognized by twelve data, alpha vantage, tiingo, finnhub, gnews, or fmp";
 }
 
 document.getElementById("addKeyBtn").onclick = () => {
@@ -637,6 +659,11 @@ function removeFinnhubKey(k) {
 function removeGnewsKey(k) {
   gnewsKeys = gnewsKeys.filter(x => x !== k);
   localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys));
+  renderKeys();
+}
+function removeFmpKey(k) {
+  fmpKeys = fmpKeys.filter(x => x !== k);
+  localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys));
   renderKeys();
 }
 
@@ -675,6 +702,16 @@ function renderKeys() {
     const rm = document.createElement("button");
     rm.textContent = "remove";
     rm.onclick = () => removeGnewsKey(k);
+    row.appendChild(rm);
+    keyListEl.appendChild(row);
+  });
+  fmpKeys.forEach(k => {
+    const row = document.createElement("div");
+    row.className = "keyrow";
+    row.innerHTML = `<span class="keylabel">fmp</span><span>${maskKey(k)}</span>`;
+    const rm = document.createElement("button");
+    rm.textContent = "remove";
+    rm.onclick = () => removeFmpKey(k);
     row.appendChild(rm);
     keyListEl.appendChild(row);
   });
@@ -966,9 +1003,46 @@ function isSecFilingsFresh(symbol) {
   return f && Date.now() - f.fetchedAt < SEC_FILING_TTL_MS;
 }
 
+async function fetchSecFilingsViaFmp(symbol, key, formType) {
+  const url = "https://financialmodelingprep.com/stable/sec-filings-search/symbol?symbol=" + symbol + "&formType=" + formType + "&page=0&limit=8&apikey=" + key;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0 || data["Error Message"]) return null;
+  const filings = data.map(item => {
+    const dateStr = item.filingDate || item.acceptedDate || "";
+    return {
+      form: item.formType || item.type || formType,
+      filingDate: dateStr.slice(0, 10),
+      accessionNumber: item.accessionNumber || item.finalLink || "unknown",
+      timestamp: Math.floor(new Date(dateStr).getTime() / 1000)
+    };
+  }).filter(f => f.filingDate && !isNaN(f.timestamp));
+  if (filings.length === 0) return null;
+  filings.sort((a, b) => b.timestamp - a.timestamp);
+  return filings;
+}
+
 async function fetchSecFilings(symbol) {
-  statusEl.textContent = "checking SEC EDGAR for " + symbol;
+  statusEl.textContent = "checking SEC filings for " + symbol;
   const formType = SEC_FOREIGN_FILERS.includes(symbol) ? "20-F" : "10-K";
+
+  const fmpKey = nextFmpKey();
+  if (fmpKey) {
+    try {
+      const fmpFilings = await fetchSecFilingsViaFmp(symbol, fmpKey, formType);
+      if (fmpFilings) {
+        secFilingsCache[symbol] = { filings: fmpFilings.slice(0, 8), fetchedAt: Date.now() };
+        saveSecFilingsCache();
+        statusEl.textContent = fmpFilings.length + " annual filing" + (fmpFilings.length === 1 ? "" : "s") + " found for " + symbol + " via fmp";
+        render();
+        return;
+      }
+      statusEl.textContent = "fmp returned nothing for " + symbol + ", falling back to SEC EDGAR directly";
+    } catch (e) {
+      statusEl.textContent = "fmp lookup failed for " + symbol + ", falling back to SEC EDGAR directly";
+    }
+  }
+
   try {
     const edgarUrl = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=" + symbol + "&type=" + formType + "&dateb=&owner=include&count=20&output=atom";
     const proxyUrl = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(edgarUrl);
@@ -995,7 +1069,7 @@ async function fetchSecFilings(symbol) {
     filings.sort((a, b) => b.timestamp - a.timestamp);
     secFilingsCache[symbol] = { filings: filings.slice(0, 8), fetchedAt: Date.now() };
     saveSecFilingsCache();
-    statusEl.textContent = filings.length + " annual filing" + (filings.length === 1 ? "" : "s") + " found for " + symbol;
+    statusEl.textContent = filings.length + " annual filing" + (filings.length === 1 ? "" : "s") + " found for " + symbol + " via SEC EDGAR";
     render();
   } catch (e) {
     statusEl.textContent = "SEC EDGAR lookup failed";
