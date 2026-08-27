@@ -186,7 +186,8 @@
           <input id="addKeyInput" type="text" placeholder="paste any api key">
           <button id="addKeyBtn">add</button>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, alpha vantage, tiingo, finnhub, gnews, or fmp key, it gets tested and filed automatically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+        <button id="addAlphaVantageBtn" style="width:100%;margin-top:6px;">this key is for alpha vantage specifically</button>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, tiingo, finnhub, gnews, or fmp key and hit add, it gets tested and filed automatically. alpha vantage is not auto-detected, its own api accepts almost any string without real validation, so use the dedicated button above for those keys specifically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -608,23 +609,27 @@ async function detectAndAddKey(raw) {
     }
   } catch (e) {}
 
+  statusEl.textContent = "key not recognized by twelve data, tiingo, finnhub, gnews, or fmp. if this is an alpha vantage key, use the alpha vantage button instead, its own api can't be auto-detected reliably";
+}
+
+async function addAlphaVantageKey(raw) {
+  if (!raw) return;
+  statusEl.textContent = "checking alpha vantage key...";
   try {
     const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`);
     const d = await r.json();
     const gq = d && d["Global Quote"];
-    const looksLikeRealAV = gq && gq["05. price"] && gq["01. symbol"] === "AAPL" && gq["07. latest trading day"];
-    if (looksLikeRealAV) {
+    if (gq && gq["05. price"]) {
       if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) {
         keys.push({ provider: "alphavantage", key: raw });
         saveKeysArray();
       }
       renderKeys();
-      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day";
+      statusEl.textContent = "added as an alpha vantage key, limited to 25 lookups a day. note: alpha vantage's own api accepts most strings without real validation, so this only confirms the endpoint responded, not that the key is genuinely yours";
       return;
     }
   } catch (e) {}
-
-  statusEl.textContent = "key not recognized by twelve data, alpha vantage, tiingo, finnhub, gnews, or fmp";
+  statusEl.textContent = "alpha vantage did not return a usable response for this key";
 }
 
 document.getElementById("addKeyBtn").onclick = () => {
@@ -633,6 +638,14 @@ document.getElementById("addKeyBtn").onclick = () => {
   if (!v) return;
   input.value = "";
   detectAndAddKey(v);
+};
+
+document.getElementById("addAlphaVantageBtn").onclick = () => {
+  const input = document.getElementById("addKeyInput");
+  const v = input.value.trim();
+  if (!v) return;
+  input.value = "";
+  addAlphaVantageKey(v);
 };
 
 document.getElementById("addBtn").onclick = () => {
