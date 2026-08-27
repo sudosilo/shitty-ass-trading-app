@@ -182,12 +182,15 @@
       <div id="keysManager">
         <h3>api keys (<span id="keyCount">0</span>, refresh cycle: <span id="cycleTime">-</span>)</h3>
         <div id="keyList"></div>
-        <div class="row" style="margin-bottom:0;">
+        <div class="row" style="margin-bottom:6px;">
           <input id="addKeyInput" type="text" placeholder="paste any api key">
           <button id="addKeyBtn">add</button>
         </div>
-        <button id="addAlphaVantageBtn" style="width:100%;margin-top:6px;">this key is for alpha vantage specifically</button>
-        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, tiingo, finnhub, gnews, or fmp key and hit add, it gets tested and filed automatically. alpha vantage is not auto-detected, its own api accepts almost any string without real validation, so use the dedicated button above for those keys specifically. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;margin-bottom:0;">
+          <input type="checkbox" id="isAlphaVantageCheck" style="width:auto;">
+          this key is for alpha vantage specifically
+        </label>
+        <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">paste a twelve data, tiingo, finnhub, gnews, or fmp key and hit add, it gets tested and filed automatically. alpha vantage is not auto-detected, its own api accepts almost any string without real validation, so check the box above first if this key is one of those. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp is optional and gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
       </div>
     </div>
   </div>
@@ -636,16 +639,14 @@ document.getElementById("addKeyBtn").onclick = () => {
   const input = document.getElementById("addKeyInput");
   const v = input.value.trim();
   if (!v) return;
+  const isAv = document.getElementById("isAlphaVantageCheck").checked;
   input.value = "";
-  detectAndAddKey(v);
-};
-
-document.getElementById("addAlphaVantageBtn").onclick = () => {
-  const input = document.getElementById("addKeyInput");
-  const v = input.value.trim();
-  if (!v) return;
-  input.value = "";
-  addAlphaVantageKey(v);
+  document.getElementById("isAlphaVantageCheck").checked = false;
+  if (isAv) {
+    addAlphaVantageKey(v);
+  } else {
+    detectAndAddKey(v);
+  }
 };
 
 document.getElementById("addBtn").onclick = () => {
