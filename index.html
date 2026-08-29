@@ -1014,6 +1014,7 @@ function parseFDADate(d) {
 
 const SEC_FOREIGN_FILERS = ["ARCO", "YUMC"];
 const SEC_FILING_TTL_MS = 24 * 60 * 60000;
+const BACKEND_URL = "https://qsr-tracker-backend-production.up.railway.app";
 let secFilingsCache = JSON.parse(localStorage.getItem("st_sec_filings_cache") || "null") || {};
 let showSecFilings = false;
 
@@ -1025,76 +1026,26 @@ function isSecFilingsFresh(symbol) {
   return f && Date.now() - f.fetchedAt < SEC_FILING_TTL_MS;
 }
 
-async function fetchSecFilingsViaFmp(symbol, key, formType) {
-  const url = "https://financialmodelingprep.com/stable/sec-filings-search/symbol?symbol=" + symbol + "&formType=" + formType + "&page=0&limit=8&apikey=" + key;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0 || data["Error Message"]) return null;
-  const filings = data.map(item => {
-    const dateStr = item.filingDate || item.acceptedDate || "";
-    return {
-      form: item.formType || item.type || formType,
-      filingDate: dateStr.slice(0, 10),
-      accessionNumber: item.accessionNumber || item.finalLink || "unknown",
-      timestamp: Math.floor(new Date(dateStr).getTime() / 1000)
-    };
-  }).filter(f => f.filingDate && !isNaN(f.timestamp));
-  if (filings.length === 0) return null;
-  filings.sort((a, b) => b.timestamp - a.timestamp);
-  return filings;
-}
-
 async function fetchSecFilings(symbol) {
   statusEl.textContent = "checking SEC filings for " + symbol;
   const formType = SEC_FOREIGN_FILERS.includes(symbol) ? "20-F" : "10-K";
-
-  const fmpKey = nextFmpKey();
-  if (fmpKey) {
-    try {
-      const fmpFilings = await fetchSecFilingsViaFmp(symbol, fmpKey, formType);
-      if (fmpFilings) {
-        secFilingsCache[symbol] = { filings: fmpFilings.slice(0, 8), fetchedAt: Date.now() };
-        saveSecFilingsCache();
-        statusEl.textContent = fmpFilings.length + " annual filing" + (fmpFilings.length === 1 ? "" : "s") + " found for " + symbol + " via fmp";
-        render();
-        return;
-      }
-      statusEl.textContent = "fmp returned nothing for " + symbol + ", falling back to SEC EDGAR directly";
-    } catch (e) {
-      statusEl.textContent = "fmp lookup failed for " + symbol + ", falling back to SEC EDGAR directly";
-    }
-  }
-
   try {
-    const edgarUrl = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=" + symbol + "&type=" + formType + "&dateb=&owner=include&count=20&output=atom";
-    const proxyUrl = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(edgarUrl);
-    const res = await fetch(proxyUrl);
+    const url = BACKEND_URL + "/sec-filings?symbol=" + symbol + "&form=" + formType;
+    const res = await fetch(url);
     const data = await res.json();
-    if (data.status !== "ok" || !Array.isArray(data.items)) {
+    if (data.error || !Array.isArray(data.filings)) {
       secFilingsCache[symbol] = { filings: [], fetchedAt: Date.now(), noCik: true };
       saveSecFilingsCache();
-      statusEl.textContent = "no SEC filing feed found for " + symbol;
+      statusEl.textContent = "backend returned no SEC filings for " + symbol + (data.detail ? ": " + data.detail : "");
       render();
       return;
     }
-    const filings = data.items.map(item => {
-      const desc = (item.description || "") + " " + (item.content || "");
-      const accMatch = desc.match(/Acc-no:\s*([0-9-]+)/i);
-      const formMatch = (item.title || "").match(/(10-K\/A|10-K|20-F\/A|20-F)/i);
-      return {
-        form: formMatch ? formMatch[1].toUpperCase() : formType,
-        filingDate: (item.pubDate || "").slice(0, 10),
-        accessionNumber: accMatch ? accMatch[1] : "unknown",
-        timestamp: Math.floor(new Date(item.pubDate).getTime() / 1000)
-      };
-    }).filter(f => f.filingDate && !isNaN(f.timestamp));
-    filings.sort((a, b) => b.timestamp - a.timestamp);
-    secFilingsCache[symbol] = { filings: filings.slice(0, 8), fetchedAt: Date.now() };
+    secFilingsCache[symbol] = { filings: data.filings.slice(0, 8), fetchedAt: Date.now() };
     saveSecFilingsCache();
-    statusEl.textContent = filings.length + " annual filing" + (filings.length === 1 ? "" : "s") + " found for " + symbol + " via SEC EDGAR";
+    statusEl.textContent = data.filings.length + " annual filing" + (data.filings.length === 1 ? "" : "s") + " found for " + symbol + " (" + data.source + ")";
     render();
   } catch (e) {
-    statusEl.textContent = "SEC EDGAR lookup failed";
+    statusEl.textContent = "backend request failed for " + symbol + ": " + (e && e.message ? e.message : "network error");
   }
 }
 
