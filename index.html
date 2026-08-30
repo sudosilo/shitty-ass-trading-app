@@ -124,10 +124,11 @@
     <button class="hamburger" id="infoBtnSetup" title="about this app">&#9432;</button>
     <h1 style="margin:0;">stock tracker setup</h1>
   </div>
-  <p>enter one or more free twelve data api keys, one per line, for the fastest and most reliable refresh across your ticker list, each key gets its own 8 requests per minute allowance. this is optional, leave it blank and tap continue to start tracking right away on a shared key built into the app, which is slower since it's split across everyone using this without their own key, but works with zero setup.</p>
+  <p>enter one or more free twelve data api keys, one per line, for the fastest and most reliable refresh across your ticker list, each key gets its own 8 requests per minute allowance. or skip this entirely and use the shared key built into the app instead, slower since it's split across everyone using it without their own key, but works with zero setup.</p>
   <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
   <button class="primary" id="saveKeyBtn">save keys and continue</button>
-  <p style="font-size:11px;color:#9ca3af;">sign up at <a href="https://twelvedata.com/" target="_blank" rel="noopener">twelvedata.com</a>, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above, or skip this and tap continue with the box empty</p>
+  <button id="useHouseKeyBtn" style="margin-top:8px;">use shared key instead</button>
+  <p style="font-size:11px;color:#9ca3af;">sign up at <a href="https://twelvedata.com/" target="_blank" rel="noopener">twelvedata.com</a>, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
   <p style="font-size:11px;color:#9ca3af;">tap the info button above before entering anything if you want to know what this app does and how it handles your keys first</p>
 </div>
 
@@ -610,7 +611,14 @@ function blockColorFor(sym) {
 document.getElementById("saveKeyBtn").onclick = () => {
   const raw = document.getElementById("keyInput").value;
   const parsed = raw.split(/[\n,]/).map(k => k.trim()).filter(Boolean);
+  if (parsed.length === 0) return;
   keys = parsed.map(k => ({ provider: "twelvedata", key: k }));
+  saveKeysArray();
+  boot();
+};
+
+document.getElementById("useHouseKeyBtn").onclick = () => {
+  keys = [];
   saveKeysArray();
   boot();
 };
