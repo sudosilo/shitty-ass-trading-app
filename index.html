@@ -2422,8 +2422,12 @@ function render() {
       requestAnimationFrame(() => drawChart(points, markers));
     }
   }
-  const usingHouseKeyForFooter = !keys.some(k => k.provider === "twelvedata");
-  if (usingHouseKeyForFooter) {
+  const twelveDataKeyForFooter = keys.find(k => k.provider === "twelvedata");
+  const usingHouseKeyForFooter = !keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage");
+  if (twelveDataKeyForFooter) {
+    const minutesBetween = Math.max(5, Math.round(tickers.length * (16 * 60) / 700));
+    footEl.textContent = tickers.length + " tickers on your own twelve data key, auto-refreshing about every " + minutesBetween + " minutes to stay inside the free tier's 800 credit daily limit";
+  } else if (usingHouseKeyForFooter) {
     footEl.textContent = tickers.length + " tickers via the shared key, batched into one request, refreshes about every minute";
   } else {
     const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : 0;
@@ -2530,12 +2534,23 @@ function startPolling() {
     }
   }
 
+  // a personal twelve data key has no cache sitting in front of it the way the house key
+  // does, so every refresh spends real credits against the account's own 800-per-day budget,
+  // one credit per symbol regardless of how the request is batched. refreshing a 52-ticker
+  // list every 45 seconds burns that entire daily budget in under two hours, which is what
+  // actually happened. this spaces refreshes out to spend at most about 700 of the 800 daily
+  // credits on quotes across a 16 hour active window, leaving real room for chart opens and
+  // everything else that also draws from the same account.
+  const TWELVE_DATA_DAILY_QUOTE_BUDGET = 700;
+  const ASSUMED_ACTIVE_HOURS = 16;
+  const personalKeyIntervalMs = Math.max(5 * 60000, Math.round(tickers.length * (ASSUMED_ACTIVE_HOURS * 3600000) / TWELVE_DATA_DAILY_QUOTE_BUDGET));
+
   refreshAll();
   setInterval(() => {
     if (selected) return;
     refreshAll();
     refreshBlockColors();
-  }, twelveDataKey ? 45000 : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
+  }, twelveDataKey ? personalKeyIntervalMs : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
 }
 
 function boot() {
