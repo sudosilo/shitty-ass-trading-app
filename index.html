@@ -1854,16 +1854,16 @@ function isHistoryFreshRange(symbol, apiRange) {
   return h && Date.now() - h.fetchedAt < HISTORY_TTL_MS[apiRange];
 }
 
-async function refreshHistoryViaPersonalBatch(symbols, apiRange, key) {
-  const needed = symbols.filter(s => !isHistoryFreshRange(s, apiRange));
-  if (needed.length === 0) return;
-  const cfg = API_RANGE_MAP[apiRange];
+async function fetchHistoryChunk(chunk, apiRange, cfg, key) {
   try {
-    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${needed.join(",")}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
+    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${chunk.join(",")}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
     const json = await res.json();
-    // same single-vs-keyed shape split as everywhere else this pattern shows up.
-    const bySymbol = needed.length === 1 && json.values ? { [needed[0]]: json } : json;
-    needed.forEach(sym => {
+    if (json.code === 429 || json.status === "error") {
+      statusEl.textContent = "twelve data: " + (json.message || "rate limit reached, will retry");
+      return;
+    }
+    const bySymbol = chunk.length === 1 && json.values ? { [chunk[0]]: json } : json;
+    chunk.forEach(sym => {
       const entry = bySymbol[sym];
       if (!entry || entry.status === "error" || !entry.values) return;
       const points = entry.values.map(v => ({ date: v.datetime, close: parseFloat(v.close) })).reverse();
@@ -1873,6 +1873,18 @@ async function refreshHistoryViaPersonalBatch(symbols, apiRange, key) {
     render();
   } catch (e) {
     statusEl.textContent = "batched history request failed";
+  }
+}
+
+// same credit-per-symbol exposure as quotes, chunked the same way for the same reason.
+async function refreshHistoryViaPersonalBatch(symbols, apiRange, key) {
+  const needed = symbols.filter(s => !isHistoryFreshRange(s, apiRange));
+  if (needed.length === 0) return;
+  const cfg = API_RANGE_MAP[apiRange];
+  const chunks = chunkArray(needed, FREE_TIER_CREDITS_PER_MINUTE);
+  for (let i = 0; i < chunks.length; i++) {
+    await fetchHistoryChunk(chunks[i], apiRange, cfg, key);
+    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
   }
 }
 
@@ -2447,16 +2459,24 @@ function isQuoteFresh(sym) {
   return q && Date.now() - q.fetchedAt < QUOTE_TTL_MS;
 }
 
-async function refreshQuotesViaPersonalBatch(symbols, key) {
-  const needed = symbols.filter(s => !isQuoteFresh(s));
-  if (needed.length === 0) return;
+const FREE_TIER_CREDITS_PER_MINUTE = 8;
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
+async function fetchQuoteChunk(chunk, key) {
   try {
-    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${needed.join(",")}&apikey=${key}`);
+    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${chunk.join(",")}&apikey=${key}`);
     const json = await res.json();
-    // a single symbol comes back flat, more than one comes back keyed by symbol, same shape
-    // split as the house key relay, twelve data behaves identically regardless of whose key it is.
-    const bySymbol = needed.length === 1 && json.symbol ? { [needed[0]]: json } : json;
-    needed.forEach(sym => {
+    if (json.code === 429 || json.status === "error") {
+      statusEl.textContent = "twelve data: " + (json.message || "rate limit reached, will retry");
+      return;
+    }
+    const bySymbol = chunk.length === 1 && json.symbol ? { [chunk[0]]: json } : json;
+    chunk.forEach(sym => {
       const entry = bySymbol[sym];
       if (!entry || entry.status === "error" || entry.code) return;
       quotes[sym] = {
@@ -2471,6 +2491,20 @@ async function refreshQuotesViaPersonalBatch(symbols, key) {
     render();
   } catch (e) {
     statusEl.textContent = "batched quote request failed";
+  }
+}
+
+// twelve data bills one credit per symbol in a batch, not one credit per request, so a
+// single oversized batch can blow straight through the free tier's per-minute credit limit
+// in one call. chunking to that same limit keeps the real win, far fewer requests than one
+// per symbol, without tripping the ceiling that a single 52-symbol batch would hit instantly.
+async function refreshQuotesViaPersonalBatch(symbols, key) {
+  const needed = symbols.filter(s => !isQuoteFresh(s));
+  if (needed.length === 0) return;
+  const chunks = chunkArray(needed, FREE_TIER_CREDITS_PER_MINUTE);
+  for (let i = 0; i < chunks.length; i++) {
+    await fetchQuoteChunk(chunks[i], key);
+    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
   }
 }
 
