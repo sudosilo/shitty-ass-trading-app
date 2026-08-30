@@ -127,7 +127,7 @@
   <p>enter one or more free twelve data api keys, one per line. each key gets its own 8 requests per minute allowance, more keys means faster refresh across your ticker list.</p>
   <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
   <button class="primary" id="saveKeyBtn">save keys and continue</button>
-  <p style="font-size:11px;color:#9ca3af;">sign up at twelvedata.com, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
+  <p style="font-size:11px;color:#9ca3af;">sign up at <a href="https://twelvedata.com/" target="_blank" rel="noopener">twelvedata.com</a>, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
   <p style="font-size:11px;color:#9ca3af;">tap the info button above before entering anything if you want to know what this app does and how it handles your keys first</p>
 </div>
 
@@ -625,36 +625,42 @@ function setKeyStatus(msg) {
 const PROVIDER_DEFS = {
   twelvedata: {
     label: "twelve data",
+    signupUrl: "https://twelvedata.com/",
     test: (raw) => fetch(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${raw}`).then(r => r.json()),
     isValid: (d) => !!(d && d.symbol && !d.code),
     add: (raw) => { if (!keys.some(k => k.provider === "twelvedata" && k.key === raw)) { keys.push({ provider: "twelvedata", key: raw }); saveKeysArray(); } }
   },
   tiingo: {
     label: "tiingo",
+    signupUrl: "https://www.tiingo.com/",
     test: (raw) => fetch(`https://api.tiingo.com/tiingo/daily/aapl?token=${raw}`).then(r => r.json()),
     isValid: (d) => !!(d && d.ticker),
     add: (raw) => { if (!keys.some(k => k.provider === "tiingo" && k.key === raw)) { keys.push({ provider: "tiingo", key: raw }); saveKeysArray(); } }
   },
   alphavantage: {
     label: "alpha vantage",
+    signupUrl: "https://www.alphavantage.co/support/#api-key",
     test: (raw) => fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${raw}`).then(r => r.json()),
     isValid: (d) => !!(d && d["Global Quote"] && d["Global Quote"]["05. price"]),
     add: (raw) => { if (!keys.some(k => k.provider === "alphavantage" && k.key === raw)) { keys.push({ provider: "alphavantage", key: raw }); saveKeysArray(); } }
   },
   finnhub: {
     label: "finnhub",
+    signupUrl: "https://finnhub.io/",
     test: (raw) => fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${raw}`).then(r => r.json()),
     isValid: (d) => !!(d && typeof d.c === "number" && d.c > 0),
     add: (raw) => { if (!finnhubKeys.includes(raw)) { finnhubKeys.push(raw); localStorage.setItem("st_finnhub_keys", JSON.stringify(finnhubKeys)); } }
   },
   gnews: {
     label: "gnews",
+    signupUrl: "https://gnews.io/",
     test: (raw) => fetch(`https://gnews.io/api/v4/search?q=test&max=1&token=${raw}`).then(r => r.json()),
     isValid: (d) => !!(d && Array.isArray(d.articles)),
     add: (raw) => { if (!gnewsKeys.includes(raw)) { gnewsKeys.push(raw); localStorage.setItem("st_gnews_keys", JSON.stringify(gnewsKeys)); } }
   },
   fmp: {
     label: "fmp",
+    signupUrl: "https://site.financialmodelingprep.com/developer/docs",
     test: (raw) => fetch(`https://financialmodelingprep.com/stable/quote?symbol=AAPL&apikey=${raw}`).then(r => r.json()),
     isValid: (d) => Array.isArray(d) && d.length > 0 && d[0].symbol === "AAPL",
     add: (raw) => { if (!fmpKeys.includes(raw)) { fmpKeys.push(raw); localStorage.setItem("st_fmp_keys", JSON.stringify(fmpKeys)); } }
@@ -690,7 +696,7 @@ function renderProviderAddRows() {
     const cfg = PROVIDER_DEFS[pid];
     const row = document.createElement("div");
     row.className = "providerRow";
-    row.innerHTML = `<span class="providerLabel">${cfg.label}</span><button class="plusBtn" data-provider="${pid}">+</button>`;
+    row.innerHTML = `<span class="providerLabel">${cfg.label}${cfg.signupUrl ? ` <a href="${cfg.signupUrl}" target="_blank" rel="noopener" style="font-size:10px;font-weight:normal;">get a key</a>` : ""}</span><button class="plusBtn" data-provider="${pid}">+</button>`;
     container.appendChild(row);
 
     const panel = document.createElement("div");
