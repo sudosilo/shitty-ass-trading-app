@@ -2357,8 +2357,39 @@ function render() {
       requestAnimationFrame(() => drawChart(points, markers));
     }
   }
-  const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : 0;
-  footEl.textContent = tickers.length + " tickers across " + keys.length + " keys, full refresh cycle takes about " + cycleSec + " seconds";
+  const usingHouseKeyForFooter = !keys.some(k => k.provider === "twelvedata");
+  if (usingHouseKeyForFooter) {
+    footEl.textContent = tickers.length + " tickers via the shared key, batched into one request, refreshes about every minute";
+  } else {
+    const cycleSec = keys.length > 0 ? Math.round((tickers.length * KEY_COOLDOWN_MS) / keys.length / 1000) : 0;
+    footEl.textContent = tickers.length + " tickers across " + keys.length + " keys, full refresh cycle takes about " + cycleSec + " seconds";
+  }
+}
+
+async function refreshQuotesViaHouseBatch(symbols) {
+  const needed = symbols.filter(s => !isQuoteFresh(s));
+  if (needed.length === 0) return;
+  statusEl.textContent = "fetching " + needed.length + " quote" + (needed.length === 1 ? "" : "s") + " via shared key";
+  try {
+    const res = await fetch(BACKEND_URL + "/house/quotes?symbols=" + needed.join(","));
+    const data = await res.json();
+    if (!data.results) return;
+    Object.keys(data.results).forEach(sym => {
+      const r = data.results[sym];
+      quotes[sym] = {
+        price: r.price,
+        change: r.change,
+        percent: r.percent,
+        updated: new Date().toLocaleTimeString(),
+        fetchedAt: Date.now(),
+        source: "live"
+      };
+    });
+    statusEl.textContent = needed.length + " quote" + (needed.length === 1 ? "" : "s") + " updated via shared key";
+    render();
+  } catch (e) {
+    statusEl.textContent = "shared key batch request failed";
+  }
 }
 
 function isQuoteFresh(sym) {
@@ -2367,16 +2398,25 @@ function isQuoteFresh(sym) {
 }
 
 function startPolling() {
-  tickers.forEach(sym => {
-    if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
-  });
-  setInterval(() => {
-    if (selected) return;
+  const usingHouseKey = !keys.some(k => k.provider === "twelvedata");
+  if (usingHouseKey) {
+    refreshQuotesViaHouseBatch(tickers);
+  } else {
     tickers.forEach(sym => {
       if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
     });
+  }
+  setInterval(() => {
+    if (selected) return;
+    if (usingHouseKey) {
+      refreshQuotesViaHouseBatch(tickers);
+    } else {
+      tickers.forEach(sym => {
+        if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
+      });
+    }
     refreshBlockColors();
-  }, Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "twelvedata").length, 1)));
+  }, Math.max(20000, usingHouseKey ? 60000 : (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "twelvedata").length, 1)));
 }
 
 function boot() {
