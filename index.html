@@ -1161,58 +1161,61 @@ function isLeadershipFresh(symbol) {
   return Date.now() - c.fetchedAt < ttl;
 }
 
-async function fetchLeadership(symbol) {
-  statusEl.textContent = "checking wikidata for " + symbol + "'s leadership";
-  // ticker symbol (P249) is documented as a qualifier on the stock exchange statement (P414),
-  // not always a standalone fact on the company itself, so check both forms, whichever
-  // matches. Missing this the first time is exactly why McDonald's came back empty.
-  const sparql = `SELECT ?companyLabel ?ceoLabel ?image WHERE {
+async function fetchLeadershipBatch(symbols) {
+  const needed = symbols.filter(s => !isLeadershipFresh(s));
+  if (needed.length === 0) return;
+  statusEl.textContent = "checking wikidata for " + needed.length + " ticker" + (needed.length === 1 ? "" : "s") + "'s leadership";
+  const valuesClause = needed.map(s => `"${s}"`).join(" ");
+  // one query, matched against the whole list at once via VALUES, rather than one query per
+  // ticker. unlike twelve data there's no per-symbol billing here to chunk around, wikidata's
+  // own SPARQL endpoint is built to take a list like this in a single request.
+  const sparql = `SELECT ?ticker ?companyLabel ?ceoLabel ?image WHERE {
+    VALUES ?ticker { ${valuesClause} }
     {
-      ?company wdt:P249 "${symbol}".
+      ?company wdt:P249 ?ticker.
     } UNION {
       ?company p:P414 ?exchangeStatement.
-      ?exchangeStatement pq:P249 "${symbol}".
+      ?exchangeStatement pq:P249 ?ticker.
     }
     OPTIONAL { ?company wdt:P169 ?ceo. }
     OPTIONAL { ?ceo wdt:P18 ?image. }
     SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
-  } LIMIT 5`;
+  }`;
   try {
     const url = "https://query.wikidata.org/sparql?format=json&query=" + encodeURIComponent(sparql);
     const res = await fetch(url, { headers: { "Accept": "application/sparql-results+json" } });
     const data = await res.json();
     const rows = (data.results && data.results.bindings) || [];
-    if (rows.length === 0 || !rows[0].ceoLabel) {
-      leadershipCache[symbol] = { people: [], fetchedAt: Date.now() };
-      saveLeadershipCache();
-      statusEl.textContent = "wikidata has no listed ceo for " + symbol;
-      render();
-      return;
-    }
-    const seen = new Set();
-    const people = rows.filter(r => {
+
+    const bySymbol = {};
+    needed.forEach(s => { bySymbol[s] = []; });
+    rows.forEach(r => {
+      const ticker = r.ticker && r.ticker.value;
       const name = r.ceoLabel && r.ceoLabel.value;
-      if (!name || seen.has(name)) return false;
-      seen.add(name);
-      return true;
-    }).map(r => ({
-      name: r.ceoLabel.value,
-      companyName: r.companyLabel ? r.companyLabel.value : symbol,
-      image: r.image ? r.image.value : null
-    }));
-    leadershipCache[symbol] = { people: people, fetchedAt: Date.now() };
+      if (!ticker || !bySymbol[ticker] || !name) return;
+      if (bySymbol[ticker].some(p => p.name === name)) return;
+      bySymbol[ticker].push({
+        name,
+        companyName: r.companyLabel ? r.companyLabel.value : ticker,
+        image: r.image ? r.image.value : null
+      });
+    });
+
+    needed.forEach(s => {
+      leadershipCache[s] = { people: bySymbol[s], fetchedAt: Date.now() };
+    });
     saveLeadershipCache();
-    statusEl.textContent = "wikidata leadership data updated for " + symbol;
+    statusEl.textContent = "wikidata leadership data updated for " + needed.length + " ticker" + (needed.length === 1 ? "" : "s");
     render();
   } catch (e) {
-    statusEl.textContent = "wikidata request failed for " + symbol;
+    statusEl.textContent = "wikidata batch request failed";
   }
 }
 
 function toggleLeadership() {
   showLeadership = !showLeadership;
   if (showLeadership && !isLeadershipFresh(selected)) {
-    fetchLeadership(selected);
+    fetchLeadershipBatch(tickers);
   } else {
     render();
   }
