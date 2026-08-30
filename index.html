@@ -898,16 +898,13 @@ async function fetchHistoryTiingo(symbol, uiRange, key) {
   const apiRange = apiRangeFor(uiRange);
   if (apiRange !== "DAILY") return;
   try {
-    const start = new Date();
-    start.setDate(start.getDate() - 400);
-    const startDate = start.toISOString().slice(0, 10);
-    const res = await fetch(`https://api.tiingo.com/tiingo/daily/${symbol}/prices?token=${key}&startDate=${startDate}`);
+    const res = await fetch(BACKEND_URL + "/tiingo/history?symbol=" + symbol.toLowerCase() + "&key=" + encodeURIComponent(key));
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      statusEl.textContent = symbol + " history (tiingo): " + (data.detail || "no data");
+    if (data.error || !Array.isArray(data.points) || data.points.length === 0) {
+      statusEl.textContent = symbol + " history (tiingo): " + (data.detail || data.error || "no data");
       return;
     }
-    const points = data.map(d => ({ date: d.date.slice(0, 10), close: parseFloat(d.close) })).slice(-260);
+    const points = data.points.slice(-260);
     history[symbol + "_" + apiRange] = { points: points, fetchedAt: Date.now(), source: "live" };
     saveHistoryCache();
     if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
@@ -1238,31 +1235,15 @@ const MAGAZINE_ARCHIVE_MS = 30 * 24 * 60 * 60000;
 async function fetchMagazineFeed() {
   statusEl.textContent = "checking QSR Magazine feed";
   try {
-    const feedUrl = encodeURIComponent("https://www.qsrmagazine.com/feed/");
-    const res = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + feedUrl);
+    const res = await fetch(BACKEND_URL + "/magazine");
     const data = await res.json();
-    if (data.status !== "ok" || !Array.isArray(data.items)) {
+    if (!data.articles || !Array.isArray(data.articles)) {
       statusEl.textContent = "QSR Magazine feed unavailable right now";
       return;
     }
-    const fresh = data.items.map(item => ({
-      id: item.link || item.guid || (item.title + "|" + item.pubDate),
-      title: item.title,
-      link: item.link || "",
-      pubDate: item.pubDate,
-      timestamp: Math.floor(new Date(item.pubDate).getTime() / 1000),
-      snippet: (item.description || "").replace(/<[^>]+>/g, "").trim().slice(0, 200)
-    }));
-    const existing = (magazineCache && magazineCache.articles) || [];
-    const byId = {};
-    existing.forEach(a => { byId[a.id] = a; });
-    fresh.forEach(a => { byId[a.id] = a; });
-    const cutoff = Date.now() - MAGAZINE_ARCHIVE_MS;
-    const merged = Object.values(byId).filter(a => a.timestamp * 1000 >= cutoff);
-    merged.sort((a, b) => b.timestamp - a.timestamp);
-    magazineCache = { articles: merged, fetchedAt: Date.now() };
+    magazineCache = { articles: data.articles, fetchedAt: Date.now() };
     try { localStorage.setItem("st_magazine_cache", JSON.stringify(magazineCache)); } catch (e) {}
-    statusEl.textContent = "QSR Magazine feed updated, " + merged.length + " articles in the last 30 days";
+    statusEl.textContent = "QSR Magazine feed updated, " + data.articles.length + " articles in the archive (" + data.source + ")";
     render();
   } catch (e) {
     statusEl.textContent = "QSR Magazine feed request failed";
