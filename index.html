@@ -2151,7 +2151,8 @@ function render() {
           inner += `<div class="newsPanel"><p class="newsStatus">no 10-K or 20-F filings found on record</p></div>`;
         } else {
           inner += `<div class="newsPanel">` + sf.filings.map(f => {
-            return `<div class="newsItem"><div class="newsDate">${f.filingDate} &middot; ${f.form} &middot; annual report</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">accession ${f.accessionNumber}</div></div>`;
+            const openBtn = f.filingUrl ? `<button class="viewFilingBtn" data-url="${f.filingUrl}" style="font-size:10px;padding:2px 8px;margin-left:6px;">view filing</button>` : "";
+            return `<div class="newsItem"><div class="newsDate">${f.filingDate} &middot; ${f.form} &middot; annual report${openBtn}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">accession ${f.accessionNumber}</div></div>`;
           }).join("") + `</div>`;
         }
       }
@@ -2205,6 +2206,9 @@ function render() {
     if (rmBtn) rmBtn.onclick = (e) => { e.stopPropagation(); removeTicker(sym); };
     card.querySelectorAll(".dp").forEach(btn => {
       btn.onclick = (e) => { e.stopPropagation(); moveTicker(sym, btn.dataset.dir); };
+    });
+    card.querySelectorAll(".viewFilingBtn").forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); window.open(btn.dataset.url, "_blank"); };
     });
     if (isSelected) {
       card.querySelectorAll(".ranges button[data-range]").forEach(btn => {
