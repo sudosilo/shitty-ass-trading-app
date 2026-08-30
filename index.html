@@ -124,10 +124,10 @@
     <button class="hamburger" id="infoBtnSetup" title="about this app">&#9432;</button>
     <h1 style="margin:0;">stock tracker setup</h1>
   </div>
-  <p>enter one or more free twelve data api keys, one per line. each key gets its own 8 requests per minute allowance, more keys means faster refresh across your ticker list.</p>
+  <p>enter one or more free twelve data api keys, one per line, for the fastest and most reliable refresh across your ticker list, each key gets its own 8 requests per minute allowance. this is optional, leave it blank and tap continue to start tracking right away on a shared key built into the app, which is slower since it's split across everyone using this without their own key, but works with zero setup.</p>
   <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
   <button class="primary" id="saveKeyBtn">save keys and continue</button>
-  <p style="font-size:11px;color:#9ca3af;">sign up at <a href="https://twelvedata.com/" target="_blank" rel="noopener">twelvedata.com</a>, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above</p>
+  <p style="font-size:11px;color:#9ca3af;">sign up at <a href="https://twelvedata.com/" target="_blank" rel="noopener">twelvedata.com</a>, free tier account, copy the api key from the dashboard, one signup per key, paste each on its own line above, or skip this and tap continue with the box empty</p>
   <p style="font-size:11px;color:#9ca3af;">tap the info button above before entering anything if you want to know what this app does and how it handles your keys first</p>
 </div>
 
@@ -610,7 +610,6 @@ function blockColorFor(sym) {
 document.getElementById("saveKeyBtn").onclick = () => {
   const raw = document.getElementById("keyInput").value;
   const parsed = raw.split(/[\n,]/).map(k => k.trim()).filter(Boolean);
-  if (parsed.length === 0) return;
   keys = parsed.map(k => ({ provider: "twelvedata", key: k }));
   saveKeysArray();
   boot();
@@ -838,9 +837,20 @@ function keyAvailable(keyObj) {
   return true;
 }
 
+// a brand new person with zero keys configured should still see data immediately, not a
+// blank screen while they go sign up somewhere. this only ever kicks in when there is no
+// real twelve data key at all, the moment someone adds their own it takes over completely,
+// same dispatcher, same cooldown pacing, just talking to the backend's shared key instead.
+function getDispatchKeys() {
+  const hasTwelveData = keys.some(k => k.provider === "twelvedata");
+  if (hasTwelveData) return keys;
+  return [...keys, { provider: "housetwelvedata", key: "house" }];
+}
+
 setInterval(() => {
-  if (queue.length === 0 || keys.length === 0) return;
-  for (const keyObj of keys) {
+  const dispatchKeys = getDispatchKeys();
+  if (queue.length === 0 || dispatchKeys.length === 0) return;
+  for (const keyObj of dispatchKeys) {
     if (queue.length === 0) break;
     if (!keyAvailable(keyObj)) continue;
     let idx;
@@ -860,6 +870,28 @@ setInterval(() => {
 async function fetchQuote(symbol, keyObj) {
   if (keyObj.provider === "alphavantage") return fetchQuoteAlphaVantage(symbol, keyObj.key);
   if (keyObj.provider === "tiingo") return;
+  if (keyObj.provider === "housetwelvedata") {
+    try {
+      const res = await fetch(BACKEND_URL + "/house/quote?symbol=" + symbol);
+      const data = await res.json();
+      if (data.error) {
+        statusEl.textContent = symbol + " (shared key): " + data.error;
+        return;
+      }
+      quotes[symbol] = {
+        price: data.price,
+        change: data.change,
+        percent: data.percent,
+        updated: new Date().toLocaleTimeString(),
+        fetchedAt: Date.now(),
+        source: "live"
+      };
+      render();
+    } catch (e) {
+      statusEl.textContent = symbol + " (shared key): request failed";
+    }
+    return;
+  }
   const key = keyObj.key;
   try {
     const res = await fetch(`https://api.twelvedata.com/quote?symbol=${symbol}&apikey=${key}`);
@@ -1001,8 +1033,26 @@ async function fetchHistoryTiingo(symbol, uiRange, key) {
 async function fetchHistory(symbol, uiRange, keyObj) {
   if (keyObj.provider === "alphavantage") return fetchHistoryAlphaVantage(symbol, uiRange, keyObj.key);
   if (keyObj.provider === "tiingo") return fetchHistoryTiingo(symbol, uiRange, keyObj.key);
-  const key = keyObj.key;
   const apiRange = apiRangeFor(uiRange);
+  if (keyObj.provider === "housetwelvedata") {
+    try {
+      const res = await fetch(BACKEND_URL + "/house/history?symbol=" + symbol + "&range=" + apiRange);
+      const data = await res.json();
+      if (data.error || !Array.isArray(data.points)) {
+        statusEl.textContent = symbol + " history (shared key): " + (data.error || "no data");
+        return;
+      }
+      history[symbol + "_" + apiRange] = { points: data.points, fetchedAt: Date.now(), source: "live" };
+      saveHistoryCache();
+      if ((selected === symbol && apiRangeFor(selectedRange) === apiRange) || apiRangeFor(blockPeriod) === apiRange) {
+        render();
+      }
+    } catch (e) {
+      statusEl.textContent = symbol + " history (shared key): request failed";
+    }
+    return;
+  }
+  const key = keyObj.key;
   const cfg = API_RANGE_MAP[apiRange];
   try {
     const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
