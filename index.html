@@ -1,5 +1,28 @@
 <!DOCTYPE html>
+<!--
+  QSR Tracker — Orange phone code
+  Built and maintained on Orange's phone, sudosilo on GitHub.
+
+  What this is: a single-page stock tracker for publicly traded QSR, casual dining, and
+  restaurant supply chain companies. No build step, deployed straight to Vercel as this one
+  HTML file. Backend companion lives at github.com/sudosilo/qsr-tracker-backend, a small
+  Node/Express service on Railway with Redis, handling SEC filings, tariffs (Federal
+  Register), the QSR Magazine feed, Tiingo, FRED commodity and futures prices, and the
+  shared "house key" relay for Twelve Data.
+
+  Handoff notes, current pause point: quote refreshing on a personal Twelve Data key was
+  batching correctly but still burning real credits per symbol regardless of batching, one
+  credit per symbol no matter how the request is shaped. A 52-ticker list refreshing every
+  45 seconds blew through the free tier's 800-credit daily cap in under two hours. Fixed by
+  slowing personal-key auto-refresh to roughly once per hour (see startPolling, the
+  TWELVE_DATA_DAILY_QUOTE_BUDGET constant), which trades refresh speed for actually staying
+  within the free tier. Paused here intentionally rather than chasing more API changes today.
+  If picking this back up, the next reasonable step is deciding whether hourly refresh is
+  actually acceptable long term, or whether a paid Twelve Data tier or fewer tracked tickers
+  is the real fix.
+-->
 <html lang="en">
+
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -159,7 +182,7 @@
   <div class="headrow">
     <button class="hamburger" id="hamburgerBtn">&#9776;</button>
     <button class="hamburger" id="infoBtn" title="about this app">&#9432;</button>
-    <h1 style="margin:0;">qsr tracker</h1>
+    <h1 style="margin:0;color:#ea580c;" title="Orange phone code">qsr tracker</h1>
     <div id="blockMenu">
       <h3>block color average</h3>
       <div class="opts" id="periodOpts">
