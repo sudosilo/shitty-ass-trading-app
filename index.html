@@ -354,6 +354,7 @@ function stopReading() {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   isSpeaking = false;
   readAloudBtn.textContent = "read aloud";
+  document.querySelectorAll(".sectionReadBtn").forEach(b => { b.textContent = "read this section"; });
 }
 
 infoBtn.onclick = (e) => {
@@ -377,26 +378,77 @@ infoOverlay.onclick = (e) => {
     stopReading();
   }
 };
-function speakInfoText() {
-  const text = document.getElementById("infoText").textContent;
-  const utter = new SpeechSynthesisUtterance(text);
+function pickVoice(utter) {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length > 0) {
     const enVoice = voices.find(v => v.lang && v.lang.startsWith("en")) || voices[0];
     utter.voice = enVoice;
   }
-  utter.onend = () => { isSpeaking = false; readAloudBtn.textContent = "read aloud"; };
-  utter.onerror = () => { isSpeaking = false; readAloudBtn.textContent = "read aloud"; };
+}
+
+// speaks a list of text chunks one after another, chaining on each utterance's own onend
+// rather than one giant utterance, since a single very long block appears to be what wedges
+// firefox's engine into a stuck state, and confirms real playback per chunk via onstart,
+// which is far more reliable than trusting the shared speechSynthesis.speaking flag, which
+// can itself get stuck reporting true even when nothing is actually audible.
+function speakChunks(chunks, onProgress, onDone) {
   window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utter);
-  isSpeaking = true;
-  readAloudBtn.textContent = "stop reading";
-  setTimeout(() => {
-    if (isSpeaking && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-      isSpeaking = false;
-      readAloudBtn.textContent = "no sound? this browser may not support read aloud, try opening this page in chrome";
+  let index = 0;
+  let startedThisChunk = false;
+
+  function speakNext() {
+    if (index >= chunks.length) {
+      onDone();
+      return;
     }
-  }, 700);
+    const utter = new SpeechSynthesisUtterance(chunks[index]);
+    pickVoice(utter);
+    startedThisChunk = false;
+    utter.onstart = () => { startedThisChunk = true; };
+    utter.onend = () => { index++; speakNext(); };
+    utter.onerror = () => { index++; speakNext(); };
+    if (onProgress) onProgress(index, chunks.length);
+    window.speechSynthesis.speak(utter);
+
+    setTimeout(() => {
+      if (!startedThisChunk) {
+        window.speechSynthesis.cancel();
+        onDone(true);
+      }
+    }, 1500);
+  }
+  speakNext();
+}
+
+function speakInfoText() {
+  const paragraphs = [...document.querySelectorAll("#infoText p")].map(p => p.textContent).filter(Boolean);
+  isSpeaking = true;
+  speakChunks(paragraphs, (i, total) => {
+    readAloudBtn.textContent = "stop reading (" + (i + 1) + "/" + total + ")";
+  }, (failed) => {
+    isSpeaking = false;
+    readAloudBtn.textContent = failed
+      ? "no sound? this browser may not support read aloud, try opening this page in chrome"
+      : "read aloud";
+  });
+}
+
+function speakOneParagraph(text, btn) {
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  pickVoice(utter);
+  let started = false;
+  utter.onstart = () => { started = true; };
+  utter.onend = () => { btn.textContent = "read this section"; };
+  utter.onerror = () => { btn.textContent = "read this section"; };
+  btn.textContent = "reading...";
+  window.speechSynthesis.speak(utter);
+  setTimeout(() => {
+    if (!started) {
+      window.speechSynthesis.cancel();
+      btn.textContent = "no sound, try chrome";
+    }
+  }, 1500);
 }
 
 readAloudBtn.onclick = () => {
@@ -423,6 +475,28 @@ readAloudBtn.onclick = () => {
     speakInfoText();
   }, 1000);
 };
+
+function addSectionReadButtons() {
+  document.querySelectorAll("#infoText p").forEach(p => {
+    if (p.querySelector(".sectionReadBtn")) return;
+    const btn = document.createElement("button");
+    btn.className = "sectionReadBtn";
+    btn.textContent = "read this section";
+    btn.style.cssText = "display:block;font-size:10px;padding:3px 8px;margin-top:4px;";
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (!("speechSynthesis" in window)) {
+        btn.textContent = "not supported, try chrome";
+        return;
+      }
+      isSpeaking = false;
+      readAloudBtn.textContent = "read aloud";
+      speakOneParagraph(p.textContent, btn);
+    };
+    p.appendChild(btn);
+  });
+}
+addSectionReadButtons();
 
 document.querySelectorAll("#periodOpts button").forEach(btn => {
   btn.onclick = (e) => {
