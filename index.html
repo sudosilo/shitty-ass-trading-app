@@ -106,6 +106,7 @@
   .ranges button[data-action="secfilings"].active { border-color: #374151; color: #374151; }
   .ranges button[data-action="tariffs"].active { border-color: #0d9488; color: #0d9488; }
   .ranges button[data-action="commodities"].active { border-color: #b45309; color: #b45309; }
+  .ranges button[data-action="leadership"].active { border-color: #4338ca; color: #4338ca; }
   .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
   .sliderRow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .sliderRow input[type="range"] { flex: 1; }
@@ -1081,6 +1082,67 @@ function sentimentScoreFor(symbol) {
 
 const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG: "Chipotle", WEN: "Wendy's", JACK: "Jack in the Box", DPZ: "Domino's", PZZA: "Papa John's", QSR: "Restaurant Brands International", WING: "Wingstop", SHAK: "Shake Shack", CAVA: "Cava", PTLO: "Portillo's", BROS: "Dutch Bros", DNUT: "Krispy Kreme", DENN: "Denny's", PBPB: "Potbelly", CHUY: "Chuy's", SG: "Sweetgreen", KRUS: "Kura Sushi", FAT: "FAT Brands", BFI: "BurgerFi", GTIM: "Good Times Restaurants", TAST: "Carrols Restaurant Group", LOCO: "El Pollo Loco", ARCO: "Arcos Dorados", NATH: "Nathan's Famous", FRGI: "Fiesta Restaurant Group", NDLS: "Noodles & Company", YUMC: "Yum China", CBRL: "Cracker Barrel", TXRH: "Texas Roadhouse", CAKE: "Cheesecake Factory", DRI: "Darden Restaurants", EAT: "Brinker International", BLMN: "Bloomin' Brands", DIN: "Dine Brands", FWRG: "First Watch", SYY: "Sysco", USFD: "US Foods", PFGC: "Performance Food Group", ARMK: "Aramark", ECL: "Ecolab", MIDD: "Middleby", CTAS: "Cintas", KO: "Coca-Cola", KDP: "Keurig Dr Pepper", PEP: "PepsiCo", TOST: "Toast", PAR: "PAR Technology", VYX: "NCR Voyix", XYZ: "Block" };
 
+const LEADERSHIP_TTL_MS = 30 * 24 * 60 * 60000;
+let leadershipCache = JSON.parse(localStorage.getItem("st_leadership_cache") || "null") || {};
+let showLeadership = false;
+
+function saveLeadershipCache() {
+  try { localStorage.setItem("st_leadership_cache", JSON.stringify(leadershipCache)); } catch (e) {}
+}
+function isLeadershipFresh(symbol) {
+  const c = leadershipCache[symbol];
+  return c && Date.now() - c.fetchedAt < LEADERSHIP_TTL_MS;
+}
+
+async function fetchLeadership(symbol) {
+  statusEl.textContent = "checking wikidata for " + symbol + "'s leadership";
+  const sparql = `SELECT ?companyLabel ?ceoLabel ?image WHERE {
+    ?company wdt:P249 "${symbol}".
+    OPTIONAL { ?company wdt:P169 ?ceo. }
+    OPTIONAL { ?ceo wdt:P18 ?image. }
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+  } LIMIT 5`;
+  try {
+    const url = "https://query.wikidata.org/sparql?format=json&query=" + encodeURIComponent(sparql);
+    const res = await fetch(url, { headers: { "Accept": "application/sparql-results+json" } });
+    const data = await res.json();
+    const rows = (data.results && data.results.bindings) || [];
+    if (rows.length === 0 || !rows[0].ceoLabel) {
+      leadershipCache[symbol] = { people: [], fetchedAt: Date.now() };
+      saveLeadershipCache();
+      statusEl.textContent = "wikidata has no listed ceo for " + symbol;
+      render();
+      return;
+    }
+    const seen = new Set();
+    const people = rows.filter(r => {
+      const name = r.ceoLabel && r.ceoLabel.value;
+      if (!name || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    }).map(r => ({
+      name: r.ceoLabel.value,
+      companyName: r.companyLabel ? r.companyLabel.value : symbol,
+      image: r.image ? r.image.value : null
+    }));
+    leadershipCache[symbol] = { people: people, fetchedAt: Date.now() };
+    saveLeadershipCache();
+    statusEl.textContent = "wikidata leadership data updated for " + symbol;
+    render();
+  } catch (e) {
+    statusEl.textContent = "wikidata request failed for " + symbol;
+  }
+}
+
+function toggleLeadership() {
+  showLeadership = !showLeadership;
+  if (showLeadership && !isLeadershipFresh(selected)) {
+    fetchLeadership(selected);
+  } else {
+    render();
+  }
+}
+
 const FDA_RECALL_NAMES = { MCD: "mcdonald's", SBUX: "starbucks", YUM: "yum", CMG: "chipotle", WEN: "wendy's", JACK: "jack in the box", DPZ: "domino's", PZZA: "papa john's", QSR: "burger king", WING: "wingstop", SHAK: "shake shack", CAVA: "cava", PTLO: "portillo's", BROS: "dutch bros", DNUT: "krispy kreme", DENN: "denny's", PBPB: "potbelly", CHUY: "chuy's", SG: "sweetgreen", KRUS: "kura sushi", FAT: "fatburger", BFI: "burgerfi", GTIM: "good times", TAST: "burger king", LOCO: "el pollo loco", ARCO: "mcdonald's", NATH: "nathan's", FRGI: "pollo tropical", NDLS: "noodles", YUMC: "yum china", CBRL: "cracker barrel", TXRH: "texas roadhouse", CAKE: "cheesecake factory", DRI: "olive garden", EAT: "chili's", BLMN: "outback steakhouse", DIN: "ihop", FWRG: "first watch" };
 
 const INGREDIENT_KEYWORDS = { MCD: "beef", SBUX: "coffee", YUM: "chicken", CMG: "lettuce", WEN: "beef", JACK: "beef", DPZ: "cheese", PZZA: "cheese", QSR: "beef", WING: "chicken", SHAK: "beef", CAVA: "lettuce", PTLO: "beef", BROS: "coffee", DNUT: "flour", DENN: "eggs", PBPB: "turkey", CHUY: "chicken", SG: "lettuce", KRUS: "fish", FAT: "beef", BFI: "beef", GTIM: "beef", TAST: "beef", LOCO: "chicken", ARCO: "beef", NATH: "beef", FRGI: "chicken", NDLS: "pasta", YUMC: "chicken", CBRL: "eggs", TXRH: "beef", CAKE: "cheese", DRI: "pasta", EAT: "beef", BLMN: "beef", DIN: "eggs", FWRG: "eggs" };
@@ -1673,6 +1735,7 @@ function openHistory(symbol) {
   showSecFilings = false;
   showTariffs = false;
   showCommodities = false;
+  showLeadership = false;
   render();
   if (!isHistoryFresh(symbol, "3M")) {
     enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
@@ -1688,6 +1751,7 @@ function closeHistory() {
   showSecFilings = false;
   showTariffs = false;
   showCommodities = false;
+  showLeadership = false;
   queue = queue.filter(j => j.type !== "quote");
   render();
 }
@@ -1995,6 +2059,7 @@ function render() {
         <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
         ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
         ${COMMODITY_PROFILES[sym] ? `<button data-action="commodities" class="${showCommodities ? "active" : ""}">commodities</button>` : ""}
+        <button data-action="leadership" class="${showLeadership ? "active" : ""}">leadership</button>
       </div>
       <canvas id="chart" width="1000" height="220"></canvas>`;
       if (RANGE_WINDOW_SIZE[selectedRange]) {
@@ -2110,6 +2175,19 @@ function render() {
           return `<div class="newsItem"><div class="newsHeadline">${k} &middot; ${c.title}</div><div class="newsDate">latest ${latest.value} (${latest.date}) <span style="color:${dirColor};">${dir} ${Math.abs(pctChange)}% since ${earliest.date}</span></div></div>`;
         }).join("") + `</div>`;
       }
+      if (showLeadership) {
+        const lc = leadershipCache[sym];
+        if (!lc) {
+          inner += `<div class="newsPanel"><p class="newsStatus">checking wikidata</p></div>`;
+        } else if (lc.people.length === 0) {
+          inner += `<div class="newsPanel"><p class="newsStatus">wikidata has no listed chief executive for this ticker</p></div>`;
+        } else {
+          inner += `<div class="newsPanel">` + lc.people.map(p => {
+            const img = p.image ? `<img src="${p.image}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">` : "";
+            return `<div class="newsItem" style="display:flex;align-items:center;">${img}<div><div class="newsHeadline">${p.name}</div><div class="newsDate">Chief Executive Officer &middot; ${p.companyName}</div></div></div>`;
+          }).join("") + `</div>`;
+        }
+      }
     }
     card.innerHTML = inner;
     const rmBtn = card.querySelector('.rm:not([data-action="close"])');
@@ -2134,6 +2212,8 @@ function render() {
       if (tariffBtn) tariffBtn.onclick = (e) => { e.stopPropagation(); toggleTariffs(); };
       const commodityBtn = card.querySelector('[data-action="commodities"]');
       if (commodityBtn) commodityBtn.onclick = (e) => { e.stopPropagation(); toggleCommodities(); };
+      const leadershipBtn = card.querySelector('[data-action="leadership"]');
+      if (leadershipBtn) leadershipBtn.onclick = (e) => { e.stopPropagation(); toggleLeadership(); };
       const slider = card.querySelector('.periodSlider');
       if (slider) {
         slider.oninput = (e) => { e.stopPropagation(); };
