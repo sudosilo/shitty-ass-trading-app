@@ -2222,7 +2222,7 @@ function render() {
       inner += `<div class="change ${up ? "up" : "down"}">${up ? "+" : ""}${q.change.toFixed(2)} (${up ? "+" : ""}${q.percent.toFixed(2)}%)</div>`;
       inner += `<div class="updated">updated ${q.updated}</div>`;
     } else {
-      inner += `<div class="waiting">waiting for data</div>`;
+      inner += `<div class="waiting">&nbsp;</div>`;
     }
     if (!isSelected) {
       inner += `<div class="dpad">
