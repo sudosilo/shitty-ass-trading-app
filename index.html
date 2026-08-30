@@ -50,7 +50,9 @@
   .card .change.down { color: #dc2626; }
   .card .updated { font-size: 10px; color: #9ca3af; margin-top: 4px; }
   .card .waiting { font-size: 11px; color: #9ca3af; }
-  .dpad { display: grid; grid-template-columns: repeat(3, 20px); grid-template-rows: repeat(2, 18px); gap: 2px; margin-top: 8px; justify-content: start; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 20px); grid-template-rows: repeat(2, 18px); gap: 2px; justify-content: start; }
+  .tileBottomRow { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .sparkline { flex-shrink: 0; }
   .dpad .dp { grid-row: auto; padding: 0; font-size: 9px; line-height: 1; color: #9ca3af; border-color: #e5e7eb; }
   .dpad .dp[data-dir="up"] { grid-column: 2; grid-row: 1; }
   .dpad .dp[data-dir="left"] { grid-column: 1; grid-row: 2; }
@@ -620,12 +622,35 @@ function refreshBlockColors() {
     }
   });
 }
+function sparklineSvg(symbol) {
+  const h = history[symbol + "_1D"];
+  if (!h || !h.points || h.points.length < 2) return "";
+  const points = h.points.slice(-48);
+  const closes = points.map(p => p.close);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  const w = 64, ht = 28;
+  const coords = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = ht - ((c - min) / range) * ht;
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  const up = closes[closes.length - 1] >= closes[0];
+  const color = up ? "#16a34a" : "#dc2626";
+  return `<svg class="sparkline" width="${w}" height="${ht}" viewBox="0 0 ${w} ${ht}" title="last known 1D trend, cached"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
 function blockColorFor(sym) {
-  const q = quotes[sym];
   const points = getPointsForRange(sym, blockPeriod);
-  if (!q || !points || points.length === 0) return null;
+  if (!points || points.length === 0) return null;
+  const q = quotes[sym];
+  // a live quote is the real current price, but when one has never come through at all,
+  // the most recent cached close from history is still real, known data, not a guess, and
+  // is a fair stand-in rather than showing no color at all.
+  const currentPrice = q ? q.price : points[points.length - 1].close;
   const avg = points.reduce((a, p) => a + p.close, 0) / points.length;
-  const diffPct = (q.price - avg) / avg;
+  const diffPct = (currentPrice - avg) / avg;
   if (diffPct <= -0.005) return "green";
   if (diffPct >= 0.005) return "red";
   return "gray";
@@ -2225,11 +2250,14 @@ function render() {
       inner += `<div class="waiting">&nbsp;</div>`;
     }
     if (!isSelected) {
-      inner += `<div class="dpad">
-        <button class="dp" data-dir="up">&#9650;</button>
-        <button class="dp" data-dir="left">&#9664;</button>
-        <button class="dp" data-dir="right">&#9654;</button>
-        <button class="dp" data-dir="down">&#9660;</button>
+      inner += `<div class="tileBottomRow">
+        <div class="dpad">
+          <button class="dp" data-dir="up">&#9650;</button>
+          <button class="dp" data-dir="left">&#9664;</button>
+          <button class="dp" data-dir="right">&#9654;</button>
+          <button class="dp" data-dir="down">&#9660;</button>
+        </div>
+        ${sparklineSvg(sym)}
       </div>`;
     }
     if (isSelected) {
