@@ -1835,6 +1835,25 @@ function newsMarkersFor(symbol, points) {
   });
 }
 
+async function refreshHistoryViaHouseBatch(symbols, apiRange) {
+  const needed = symbols.filter(s => !isHistoryFreshRange(s, apiRange));
+  if (needed.length === 0) return;
+  try {
+    const res = await fetch(BACKEND_URL + "/house/histories?symbols=" + needed.join(",") + "&range=" + apiRange);
+    const data = await res.json();
+    if (!data.results) return;
+    Object.keys(data.results).forEach(sym => {
+      history[sym + "_" + apiRange] = { points: data.results[sym], fetchedAt: Date.now(), source: "live" };
+    });
+    saveHistoryCache();
+    render();
+  } catch (e) {}
+}
+function isHistoryFreshRange(symbol, apiRange) {
+  const h = history[symbol + "_" + apiRange];
+  return h && Date.now() - h.fetchedAt < HISTORY_TTL_MS[apiRange];
+}
+
 function openHistory(symbol) {
   if (selected === symbol) return;
   selected = symbol;
@@ -1848,7 +1867,12 @@ function openHistory(symbol) {
   showCommodities = false;
   showLeadership = false;
   render();
-  if (!isHistoryFresh(symbol, "3M")) {
+  const usingHouseKey = !keys.some(k => k.provider === "twelvedata");
+  if (usingHouseKey) {
+    // pre-warm every tracked ticker's daily history in this same request, not just the one
+    // being opened right now, so tapping into a different ticker later finds it already cached.
+    refreshHistoryViaHouseBatch(tickers, "DAILY");
+  } else if (!isHistoryFresh(symbol, "3M")) {
     enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
   }
 }
