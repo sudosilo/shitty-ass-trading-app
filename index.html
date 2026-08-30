@@ -104,6 +104,7 @@
   .ranges button[data-action="magazine"].active { border-color: #2563eb; color: #2563eb; }
   .ranges button[data-action="secfilings"].active { border-color: #374151; color: #374151; }
   .ranges button[data-action="tariffs"].active { border-color: #0d9488; color: #0d9488; }
+  .ranges button[data-action="commodities"].active { border-color: #b45309; color: #b45309; }
   .newsPanel { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid #e5e7eb; padding-top: 8px; }
   .sliderRow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .sliderRow input[type="range"] { flex: 1; }
@@ -141,7 +142,7 @@
       <p>The focus is restaurants and the businesses that feed them, rather than the whole market, because restaurant operations, unit economics, franchise structures, and food supply chains are a domain this was built with real working knowledge of. Narrowing the scope means the patterns on screen mean something instead of being noise pulled from an unrelated sector.</p>
       <p>Each tile shows the current price, the change for the day, a small dot for whether that price is fresh from the api or loaded from the browser cache, and a faint background color. Open the hamburger menu and pick week, month, or year to set what that color compares against. Green means the current price sits meaningfully below that average, red means meaningfully above, gray means it is sitting close to normal. It is a cheap or expensive signal relative to the stock's own recent history, not a buy or sell call.</p>
       <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. A slider below the range buttons lets you scrub back through earlier periods of the same size, current period on the right, drag left to go back. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
-      <p>Five buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news. 10-K pulls that company's actual annual report filing history straight from the SEC's own public EDGAR system, no key needed, and marks each filing date on the chart as a small dark square, since a scheduled annual disclosure is not inherently a positive or negative event the way news or a recall is. Tariffs checks the federal government's own Federal Register for actual tariff notices and executive orders mentioning that chain's core ingredient, and marks matches as a small teal triangle, since a real government trade action is a different kind of signal than a news headline about one.</p>
+      <p>Six buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news. 10-K pulls that company's actual annual report filing history straight from the SEC's own public EDGAR system, no key needed, and marks each filing date on the chart as a small dark square, since a scheduled annual disclosure is not inherently a positive or negative event the way news or a recall is. Tariffs checks the federal government's own Federal Register for actual tariff notices and executive orders mentioning that chain's core ingredient, and marks matches as a small teal triangle, since a real government trade action is a different kind of signal than a news headline about one. Commodities shows the real market price trend for every ingredient that chain actually depends on, beef, coffee, wheat, dairy, whichever apply, pulled from the same government price data economists use, colored red when a rising input cost is bad news for that chain's margins and green when a falling one is good news, the opposite direction from how a stock price itself gets colored.</p>
       <p>Next to the historical label sits a green and red number pair. That is a simple keyword count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, and recall data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent coverage leans one way or the other, not a signal to act on by itself.</p>
       <p>Each news headline in the one month view can also carry a second small tag showing leading or reactive. This checks five minute price data around the article's publish time, out to an hour before and after, for a move bigger than that stock's own typical five minute swing, and reports whether the move happened before the article posted or after it. Leading means the price had already started moving before the story came out, reactive means the move came after. This only works for articles that fall inside whatever intraday history is currently cached for that ticker, usually the last several trading days, an older article outside that window is labeled outside cached intraday window rather than guessed at, and a quiet stretch with no real move shows no measurable move. None of this proves the article caused anything, it only measures timing against price.</p>
       <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
@@ -992,6 +993,93 @@ const FDA_RECALL_NAMES = { MCD: "mcdonald's", SBUX: "starbucks", YUM: "yum", CMG
 
 const INGREDIENT_KEYWORDS = { MCD: "beef", SBUX: "coffee", YUM: "chicken", CMG: "lettuce", WEN: "beef", JACK: "beef", DPZ: "cheese", PZZA: "cheese", QSR: "beef", WING: "chicken", SHAK: "beef", CAVA: "lettuce", PTLO: "beef", BROS: "coffee", DNUT: "flour", DENN: "eggs", PBPB: "turkey", CHUY: "chicken", SG: "lettuce", KRUS: "fish", FAT: "beef", BFI: "beef", GTIM: "beef", TAST: "beef", LOCO: "chicken", ARCO: "beef", NATH: "beef", FRGI: "chicken", NDLS: "pasta", YUMC: "chicken", CBRL: "eggs", TXRH: "beef", CAKE: "cheese", DRI: "pasta", EAT: "beef", BLMN: "beef", DIN: "eggs", FWRG: "eggs" };
 
+const COMMODITY_PROFILES = { MCD: ["beef", "potatoes", "coffee", "wheat"], SBUX: ["coffee", "dairy", "sugar"], YUM: ["chicken", "cheese", "wheat"], CMG: ["beef", "chicken", "dairy"], WEN: ["beef", "potatoes", "dairy"], JACK: ["beef", "potatoes"], DPZ: ["cheese", "wheat"], PZZA: ["cheese", "wheat"], QSR: ["beef", "chicken", "coffee"], WING: ["chicken"], SHAK: ["beef", "dairy"], CAVA: ["chicken", "dairy"], PTLO: ["beef", "pork"], BROS: ["coffee", "dairy"], DNUT: ["wheat", "sugar"], DENN: ["eggs", "dairy", "wheat"], PBPB: ["turkey", "wheat", "cheese"], CHUY: ["chicken", "cheese"], SG: ["chicken", "dairy"], KRUS: ["rice", "fish"], FAT: ["beef"], BFI: ["beef"], GTIM: ["beef", "dairy"], TAST: ["beef"], LOCO: ["chicken"], ARCO: ["beef"], NATH: ["beef", "pork"], FRGI: ["chicken"], NDLS: ["wheat", "cheese", "dairy"], YUMC: ["chicken"], CBRL: ["eggs", "pork", "dairy"], TXRH: ["beef"], CAKE: ["dairy", "cheese", "wheat"], DRI: ["wheat", "beef"], EAT: ["beef", "chicken"], BLMN: ["beef"], DIN: ["eggs", "beef"], FWRG: ["eggs"] };
+
+const COMMODITY_SERIES_TTL_MS = 30 * 24 * 60 * 60000;
+const COMMODITY_OBS_TTL_MS = 24 * 60 * 60000;
+let commoditySeriesCache = JSON.parse(localStorage.getItem("st_commodity_series_cache") || "null") || {};
+let commodityObsCache = JSON.parse(localStorage.getItem("st_commodity_obs_cache") || "null") || {};
+let showCommodities = false;
+
+function saveCommoditySeriesCache() {
+  try { localStorage.setItem("st_commodity_series_cache", JSON.stringify(commoditySeriesCache)); } catch (e) {}
+}
+function saveCommodityObsCache() {
+  try { localStorage.setItem("st_commodity_obs_cache", JSON.stringify(commodityObsCache)); } catch (e) {}
+}
+
+async function resolveCommoditySeries(keyword) {
+  const cached = commoditySeriesCache[keyword];
+  if (cached && Date.now() - cached.fetchedAt < COMMODITY_SERIES_TTL_MS) return cached.seriesId;
+  try {
+    const res = await fetch(BACKEND_URL + "/fred/search?text=" + encodeURIComponent(keyword));
+    const data = await res.json();
+    if (data.error || !Array.isArray(data.results) || data.results.length === 0) return null;
+    const best = data.results[0];
+    commoditySeriesCache[keyword] = { seriesId: best.id, title: best.title, fetchedAt: Date.now() };
+    saveCommoditySeriesCache();
+    return best.id;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchCommodityObservations(keyword) {
+  const cached = commodityObsCache[keyword];
+  if (cached && Date.now() - cached.fetchedAt < COMMODITY_OBS_TTL_MS) return cached;
+  const seriesId = await resolveCommoditySeries(keyword);
+  if (!seriesId) {
+    const failed = { seriesId: null, title: keyword, observations: [], fetchedAt: Date.now() };
+    commodityObsCache[keyword] = failed;
+    saveCommodityObsCache();
+    return failed;
+  }
+  try {
+    const res = await fetch(BACKEND_URL + "/fred/observations?series=" + encodeURIComponent(seriesId));
+    const data = await res.json();
+    const obs = (data.observations || []).slice().reverse();
+    const result = {
+      seriesId: seriesId,
+      title: (commoditySeriesCache[keyword] && commoditySeriesCache[keyword].title) || keyword,
+      observations: obs,
+      fetchedAt: Date.now()
+    };
+    commodityObsCache[keyword] = result;
+    saveCommodityObsCache();
+    return result;
+  } catch (e) {
+    const failed = { seriesId: seriesId, title: keyword, observations: [], fetchedAt: Date.now() };
+    commodityObsCache[keyword] = failed;
+    saveCommodityObsCache();
+    return failed;
+  }
+}
+
+async function loadCommoditiesFor(symbol) {
+  const keywords = COMMODITY_PROFILES[symbol];
+  if (!keywords) return;
+  statusEl.textContent = "checking commodity prices for " + symbol;
+  await Promise.all(keywords.map(k => fetchCommodityObservations(k)));
+  statusEl.textContent = "commodity data updated for " + symbol;
+  render();
+}
+
+function toggleCommodities() {
+  showCommodities = !showCommodities;
+  if (showCommodities) {
+    const keywords = COMMODITY_PROFILES[selected] || [];
+    const needsFetch = keywords.some(k => {
+      const c = commodityObsCache[k];
+      return !c || Date.now() - c.fetchedAt >= COMMODITY_OBS_TTL_MS;
+    });
+    if (needsFetch) {
+      loadCommoditiesFor(selected);
+      return;
+    }
+  }
+  render();
+}
+
 const MAGAZINE_MATCH_NAMES = { MCD: ["mcdonald's", "mcdonalds"], SBUX: ["starbucks"], YUM: ["kfc", "taco bell", "pizza hut", "yum brands", "yum!"], CMG: ["chipotle"], WEN: ["wendy's", "wendys"], JACK: ["jack in the box"], DPZ: ["domino's", "dominos"], PZZA: ["papa john's", "papa johns"], QSR: ["burger king", "popeyes", "tim hortons", "firehouse subs", "restaurant brands"], WING: ["wingstop"], SHAK: ["shake shack"], CAVA: ["cava"], PTLO: ["portillo's", "portillos"], BROS: ["dutch bros"], DNUT: ["krispy kreme"], DENN: ["denny's", "dennys"], PBPB: ["potbelly"], CHUY: ["chuy's", "chuys"], SG: ["sweetgreen"], KRUS: ["kura sushi"], FAT: ["fatburger", "johnny rockets", "fat brands"], BFI: ["burgerfi"], GTIM: ["good times"], TAST: ["carrols", "burger king"], LOCO: ["el pollo loco"], ARCO: ["arcos dorados"], NATH: ["nathan's", "nathans famous"], FRGI: ["pollo tropical", "taco cabana", "fiesta restaurant"], NDLS: ["noodles & company", "noodles and company"], YUMC: ["yum china", "kfc china", "pizza hut china"], CBRL: ["cracker barrel"], TXRH: ["texas roadhouse"], CAKE: ["cheesecake factory"], DRI: ["olive garden", "longhorn steakhouse", "darden"], EAT: ["chili's", "chilis", "brinker"], BLMN: ["outback steakhouse", "bloomin'"], DIN: ["ihop", "applebee's", "applebees", "dine brands"], FWRG: ["first watch"] };
 let recallsCache = JSON.parse(localStorage.getItem("st_recalls_cache") || "null") || {};
 const RECALL_TTL_MS = 24 * 60 * 60000;
@@ -1492,6 +1580,7 @@ function openHistory(symbol) {
   showMagazine = false;
   showSecFilings = false;
   showTariffs = false;
+  showCommodities = false;
   render();
   if (!isHistoryFresh(symbol, "3M")) {
     enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
@@ -1506,6 +1595,7 @@ function closeHistory() {
   showMagazine = false;
   showSecFilings = false;
   showTariffs = false;
+  showCommodities = false;
   queue = queue.filter(j => j.type !== "quote");
   render();
 }
@@ -1812,6 +1902,7 @@ function render() {
         ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
         <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
         ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
+        ${COMMODITY_PROFILES[sym] ? `<button data-action="commodities" class="${showCommodities ? "active" : ""}">commodities</button>` : ""}
       </div>
       <canvas id="chart" width="1000" height="220"></canvas>`;
       if (RANGE_WINDOW_SIZE[selectedRange]) {
@@ -1911,6 +2002,22 @@ function render() {
           }
         }
       }
+      if (showCommodities) {
+        const keywords = COMMODITY_PROFILES[sym] || [];
+        inner += `<div class="newsPanel">` + keywords.map(k => {
+          const c = commodityObsCache[k];
+          if (!c) return `<div class="newsItem"><div class="newsHeadline">${k}</div><div class="newsDate">loading</div></div>`;
+          if (!c.observations || c.observations.length === 0) {
+            return `<div class="newsItem"><div class="newsHeadline">${k}</div><div class="newsDate">no FRED series could be resolved for this commodity</div></div>`;
+          }
+          const latest = c.observations[c.observations.length - 1];
+          const earliest = c.observations[0];
+          const pctChange = earliest.value !== 0 ? (((latest.value - earliest.value) / earliest.value) * 100).toFixed(1) : "0.0";
+          const dir = latest.value >= earliest.value ? "up" : "down";
+          const dirColor = dir === "up" ? "#dc2626" : "#16a34a";
+          return `<div class="newsItem"><div class="newsHeadline">${k} &middot; ${c.title}</div><div class="newsDate">latest ${latest.value} (${latest.date}) <span style="color:${dirColor};">${dir} ${Math.abs(pctChange)}% since ${earliest.date}</span></div></div>`;
+        }).join("") + `</div>`;
+      }
     }
     card.innerHTML = inner;
     const rmBtn = card.querySelector('.rm:not([data-action="close"])');
@@ -1933,6 +2040,8 @@ function render() {
       if (secBtn) secBtn.onclick = (e) => { e.stopPropagation(); toggleSecFilings(); };
       const tariffBtn = card.querySelector('[data-action="tariffs"]');
       if (tariffBtn) tariffBtn.onclick = (e) => { e.stopPropagation(); toggleTariffs(); };
+      const commodityBtn = card.querySelector('[data-action="commodities"]');
+      if (commodityBtn) commodityBtn.onclick = (e) => { e.stopPropagation(); toggleCommodities(); };
       const slider = card.querySelector('.periodSlider');
       if (slider) {
         slider.oninput = (e) => { e.stopPropagation(); };
