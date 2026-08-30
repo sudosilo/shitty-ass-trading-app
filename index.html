@@ -144,7 +144,7 @@
       <p>The focus is restaurants and the businesses that feed them, rather than the whole market, because restaurant operations, unit economics, franchise structures, and food supply chains are a domain this was built with real working knowledge of. Narrowing the scope means the patterns on screen mean something instead of being noise pulled from an unrelated sector.</p>
       <p>Each tile shows the current price, the change for the day, a small dot for whether that price is fresh from the api or loaded from the browser cache, and a faint background color. Open the hamburger menu and pick week, month, or year to set what that color compares against. Green means the current price sits meaningfully below that average, red means meaningfully above, gray means it is sitting close to normal. It is a cheap or expensive signal relative to the stock's own recent history, not a buy or sell call.</p>
       <p>Tapping a tile expands it into a chart with six ranges, one day, one week, one month, three months, one year, each pulling from the coarsest data granularity that still covers it so the app is not making more api calls than it needs to. A slider below the range buttons lets you scrub back through earlier periods of the same size, current period on the right, drag left to go back. The chart marks the high, low, and average for whatever range is showing, and the line itself shifts from black toward green on a fast rise and toward red on a fast drop, so the shape of a move is visible at a glance, not just its direction.</p>
-      <p>Six buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news. 10-K pulls that company's actual annual report filing history straight from the SEC's own public EDGAR system, no key needed, and marks each filing date on the chart as a small dark square, since a scheduled annual disclosure is not inherently a positive or negative event the way news or a recall is. Tariffs checks the federal government's own Federal Register for actual tariff notices and executive orders mentioning that chain's core ingredient, and marks matches as a small teal triangle, since a real government trade action is a different kind of signal than a news headline about one. Commodities shows the real market price trend for every ingredient that chain actually depends on, beef, coffee, wheat, dairy, whichever apply, pulled from the same government price data economists use, colored red when a rising input cost is bad news for that chain's margins and green when a falling one is good news, the opposite direction from how a stock price itself gets colored.</p>
+      <p>Six buttons sit next to the range picker. News, shown on the one month view, pulls the last 30 days of headlines for that ticker from finnhub and gnews and drops a dot on the chart at the trading day closest to each article, sized and darkened by how many articles landed on that day, colored green or red if the coverage leans one way, purple if it does not. Recalls, shown on every range, checks the FDA's open recall database two ways, once by the company's own name and once by the core ingredient that chain is built on, beef, chicken, lettuce, whatever fits, since most real recalls name the supplier or grower, not the restaurant. Recall markers are diamonds colored by severity, red for Class I, orange for Class II, yellow for Class III, and every recall not directly naming the brand is labeled as a supplier match rather than a confirmed one. Qsr mag pulls a trade publication's own coverage of that specific chain and marks it the same way as news. 10-K pulls that company's actual annual report filing history straight from the SEC's own public EDGAR system, no key needed, and marks each filing date on the chart as a small dark square, since a scheduled annual disclosure is not inherently a positive or negative event the way news or a recall is. Tariffs checks the federal government's own Federal Register for actual tariff notices and executive orders mentioning that chain's core ingredient, and marks matches as a small teal triangle, since a real government trade action is a different kind of signal than a news headline about one. Commodities shows the real market price trend for every ingredient that chain actually depends on, beef, coffee, wheat, dairy, whichever apply, pulled from the same government price data economists use, colored red when a rising input cost is bad news for that chain's margins and green when a falling one is good news, the opposite direction from how a stock price itself gets colored. For seven of those ingredients, beef, pork, coffee, wheat, dairy, sugar, and rice, a second line also shows the actual futures price from the real commodity exchanges, a delayed quote relayed through the backend since exchange data isn't something a browser can pull directly. Chicken, eggs, potatoes, turkey, and cheese don't get a futures line, those markets either never had a real exchange contract or the one that existed was discontinued for lack of trading volume, so there's nothing genuine to show.</p>
       <p>Next to the historical label sits a green and red number pair. That is a simple keyword and price move count, not a prediction. Every loaded news headline, magazine headline, and directly confirmed recall gets scanned for plain language cues, words like acquisition, expansion, and menu innovation add to the green count, words like layoffs, store closures, lawsuit, and recall add to the red one. On top of that, any commodity that chain depends on that has moved more than five percent since the earliest loaded price point also counts, a real rise in an input cost adds to red since it pressures margins, a real drop adds to green. Tariff notices deliberately do not feed this number at all, since a tariff match is found by ingredient keyword the same loose way an unconfirmed recall is, not tied to that specific company's actual supply chain, and folding that in would just reopen the same weak evidence problem already fixed for recalls. Each individual article in the lists below shows exactly which word triggered its tag, so the count is never a black box. It only reflects whatever news, magazine, recall, and commodity data has already been loaded for that ticker, and it is meant as a first, rough pass at surfacing whether recent conditions lean one way or the other, not a signal to act on by itself.</p>
       <p>Each news headline in the one month view can also carry a second small tag showing leading or reactive. This checks five minute price data around the article's publish time, out to an hour before and after, for a move bigger than that stock's own typical five minute swing, and reports whether the move happened before the article posted or after it. Leading means the price had already started moving before the story came out, reactive means the move came after. This only works for articles that fall inside whatever intraday history is currently cached for that ticker, usually the last several trading days, an older article outside that window is labeled outside cached intraday window rather than guessed at, and a quiet stretch with no real move shows no measurable move. None of this proves the article caused anything, it only measures timing against price.</p>
       <p>The small arrows under each tile let you drag it to a new spot in the grid without needing a remove button nearby, up and down jump a full row, left and right shift one space, and the order is remembered. Remove always asks for confirmation first, since a stray tap used to delete a ticker outright.</p>
@@ -1226,11 +1226,40 @@ async function fetchCommodityObservations(keyword) {
   }
 }
 
+const FUTURES_AVAILABLE = ["beef", "pork", "coffee", "wheat", "dairy", "sugar", "rice"];
+const FUTURES_TTL_MS = 15 * 60000;
+let futuresCache = JSON.parse(localStorage.getItem("st_futures_cache") || "null") || {};
+
+function saveFuturesCache() {
+  try { localStorage.setItem("st_futures_cache", JSON.stringify(futuresCache)); } catch (e) {}
+}
+function isFuturesFresh(keyword) {
+  const c = futuresCache[keyword];
+  return c && Date.now() - c.fetchedAt < FUTURES_TTL_MS;
+}
+async function fetchFuturesPrice(keyword) {
+  if (isFuturesFresh(keyword)) return futuresCache[keyword];
+  try {
+    const res = await fetch(BACKEND_URL + "/futures?commodity=" + encodeURIComponent(keyword));
+    const data = await res.json();
+    const result = data.error ? { error: data.error, fetchedAt: Date.now() } : { ...data, fetchedAt: Date.now() };
+    futuresCache[keyword] = result;
+    saveFuturesCache();
+    return result;
+  } catch (e) {
+    const failed = { error: "request failed", fetchedAt: Date.now() };
+    futuresCache[keyword] = failed;
+    saveFuturesCache();
+    return failed;
+  }
+}
+
 async function loadCommoditiesFor(symbol) {
   const keywords = COMMODITY_PROFILES[symbol];
   if (!keywords) return;
   statusEl.textContent = "checking commodity prices for " + symbol;
   await Promise.all(keywords.map(k => fetchCommodityObservations(k)));
+  await Promise.all(keywords.filter(k => FUTURES_AVAILABLE.includes(k) && !isFuturesFresh(k)).map(k => fetchFuturesPrice(k)));
   statusEl.textContent = "commodity data updated for " + symbol;
   render();
 }
@@ -1239,11 +1268,12 @@ function toggleCommodities() {
   showCommodities = !showCommodities;
   if (showCommodities) {
     const keywords = COMMODITY_PROFILES[selected] || [];
-    const needsFetch = keywords.some(k => {
+    const needsSpotFetch = keywords.some(k => {
       const c = commodityObsCache[k];
       return !c || Date.now() - c.fetchedAt >= COMMODITY_OBS_TTL_MS;
     });
-    if (needsFetch) {
+    const needsFuturesFetch = keywords.some(k => FUTURES_AVAILABLE.includes(k) && !isFuturesFresh(k));
+    if (needsSpotFetch || needsFuturesFetch) {
       loadCommoditiesFor(selected);
       return;
     }
@@ -2196,7 +2226,18 @@ function render() {
           const pctChange = earliest.value !== 0 ? (((latest.value - earliest.value) / earliest.value) * 100).toFixed(1) : "0.0";
           const dir = latest.value >= earliest.value ? "up" : "down";
           const dirColor = dir === "up" ? "#dc2626" : "#16a34a";
-          return `<div class="newsItem"><div class="newsHeadline">${k} &middot; ${c.title}</div><div class="newsDate">latest ${latest.value} (${latest.date}) <span style="color:${dirColor};">${dir} ${Math.abs(pctChange)}% since ${earliest.date}</span></div></div>`;
+          let futuresLine = "";
+          if (FUTURES_AVAILABLE.includes(k)) {
+            const f = futuresCache[k];
+            if (f && !f.error) {
+              const fDir = f.price >= f.previousClose ? "up" : "down";
+              const fColor = fDir === "up" ? "#dc2626" : "#16a34a";
+              futuresLine = `<div class="newsDate" style="margin-top:2px;">futures (${f.symbol}, ${f.exchangeName || "delayed"}) ${f.price} <span style="color:${fColor};">${fDir} from ${f.previousClose}</span></div>`;
+            } else if (f && f.error) {
+              futuresLine = `<div class="newsDate" style="margin-top:2px;">futures unavailable right now</div>`;
+            }
+          }
+          return `<div class="newsItem"><div class="newsHeadline">${k} &middot; ${c.title}</div><div class="newsDate">latest ${latest.value} (${latest.date}) <span style="color:${dirColor};">${dir} ${Math.abs(pctChange)}% since ${earliest.date}</span></div>${futuresLine}</div>`;
         }).join("") + `</div>`;
       }
       if (showLeadership) {
