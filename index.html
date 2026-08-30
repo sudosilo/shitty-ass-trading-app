@@ -1087,25 +1087,15 @@ function isTariffsFresh() {
 async function fetchTariffWatch() {
   statusEl.textContent = "checking federal register for tariff notices";
   try {
-    const targetUrl = "https://www.federalregister.gov/api/v1/documents.json?conditions%5Bterm%5D=tariff&order=newest&per_page=40&fields%5B%5D=title&fields%5B%5D=abstract&fields%5B%5D=publication_date&fields%5B%5D=agencies&fields%5B%5D=document_number&fields%5B%5D=type";
-    const url = "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl);
-    const res = await fetch(url);
+    const res = await fetch(BACKEND_URL + "/tariffs");
     const data = await res.json();
-    if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
-      statusEl.textContent = "federal register lookup returned nothing usable, not caching this attempt";
+    if (!data.docs || !Array.isArray(data.docs) || data.docs.length === 0) {
+      statusEl.textContent = "backend returned no tariff documents, not caching this attempt";
       return;
     }
-    const docs = data.results.map(d => ({
-      title: d.title,
-      abstract: d.abstract || "",
-      agencies: (d.agencies || []).map(a => a.name).join(", "),
-      documentNumber: d.document_number,
-      docType: d.type,
-      timestamp: Math.floor(new Date(d.publication_date).getTime() / 1000)
-    })).filter(d => !isNaN(d.timestamp));
-    tariffCache = { docs: docs, fetchedAt: Date.now() };
+    tariffCache = { docs: data.docs, fetchedAt: Date.now() };
     try { localStorage.setItem("st_tariff_cache", JSON.stringify(tariffCache)); } catch (e) {}
-    statusEl.textContent = docs.length + " tariff-related federal register documents found";
+    statusEl.textContent = data.docs.length + " tariff-related federal register documents found (" + data.source + ")";
     render();
   } catch (e) {
     statusEl.textContent = "federal register lookup failed, may need to move behind the backend relay";
