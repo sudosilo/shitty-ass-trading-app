@@ -1273,7 +1273,13 @@ function saveSecFilingsCache() {
 }
 function isSecFilingsFresh(symbol) {
   const f = secFilingsCache[symbol];
-  return f && Date.now() - f.fetchedAt < SEC_FILING_TTL_MS;
+  if (!f) return false;
+  // a cached result from before the filing link fix has entries with no filingUrl at all,
+  // that's a stale shape, not just stale data, force a refetch regardless of how new the
+  // timestamp looks rather than waiting up to 24 hours for it to expire on its own.
+  const missingLinks = f.filings && f.filings.length > 0 && f.filings.every(x => !x.filingUrl);
+  if (missingLinks) return false;
+  return Date.now() - f.fetchedAt < SEC_FILING_TTL_MS;
 }
 
 async function fetchSecFilings(symbol) {
