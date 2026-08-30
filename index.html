@@ -1854,6 +1854,28 @@ function isHistoryFreshRange(symbol, apiRange) {
   return h && Date.now() - h.fetchedAt < HISTORY_TTL_MS[apiRange];
 }
 
+async function refreshHistoryViaPersonalBatch(symbols, apiRange, key) {
+  const needed = symbols.filter(s => !isHistoryFreshRange(s, apiRange));
+  if (needed.length === 0) return;
+  const cfg = API_RANGE_MAP[apiRange];
+  try {
+    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${needed.join(",")}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
+    const json = await res.json();
+    // same single-vs-keyed shape split as everywhere else this pattern shows up.
+    const bySymbol = needed.length === 1 && json.values ? { [needed[0]]: json } : json;
+    needed.forEach(sym => {
+      const entry = bySymbol[sym];
+      if (!entry || entry.status === "error" || !entry.values) return;
+      const points = entry.values.map(v => ({ date: v.datetime, close: parseFloat(v.close) })).reverse();
+      history[sym + "_" + apiRange] = { points: points, fetchedAt: Date.now(), source: "live" };
+    });
+    saveHistoryCache();
+    render();
+  } catch (e) {
+    statusEl.textContent = "batched history request failed";
+  }
+}
+
 function openHistory(symbol) {
   if (selected === symbol) return;
   selected = symbol;
@@ -1867,10 +1889,14 @@ function openHistory(symbol) {
   showCommodities = false;
   showLeadership = false;
   render();
-  const usingHouseKey = !keys.some(k => k.provider === "twelvedata");
-  if (usingHouseKey) {
+  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage" || k.provider === "tiingo");
+  const usingHouseKey = !hasAnyRealKey;
+  if (twelveDataKey) {
     // pre-warm every tracked ticker's daily history in this same request, not just the one
     // being opened right now, so tapping into a different ticker later finds it already cached.
+    refreshHistoryViaPersonalBatch(tickers, "DAILY", twelveDataKey.key);
+  } else if (usingHouseKey) {
     refreshHistoryViaHouseBatch(tickers, "DAILY");
   } else if (!isHistoryFresh(symbol, "3M")) {
     enqueue({ type: "history", symbol: symbol, run: (k) => fetchHistory(symbol, "3M", k) });
@@ -2421,26 +2447,58 @@ function isQuoteFresh(sym) {
   return q && Date.now() - q.fetchedAt < QUOTE_TTL_MS;
 }
 
-function startPolling() {
-  const usingHouseKey = !keys.some(k => k.provider === "twelvedata");
-  if (usingHouseKey) {
-    refreshQuotesViaHouseBatch(tickers);
-  } else {
-    tickers.forEach(sym => {
-      if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
+async function refreshQuotesViaPersonalBatch(symbols, key) {
+  const needed = symbols.filter(s => !isQuoteFresh(s));
+  if (needed.length === 0) return;
+  try {
+    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${needed.join(",")}&apikey=${key}`);
+    const json = await res.json();
+    // a single symbol comes back flat, more than one comes back keyed by symbol, same shape
+    // split as the house key relay, twelve data behaves identically regardless of whose key it is.
+    const bySymbol = needed.length === 1 && json.symbol ? { [needed[0]]: json } : json;
+    needed.forEach(sym => {
+      const entry = bySymbol[sym];
+      if (!entry || entry.status === "error" || entry.code) return;
+      quotes[sym] = {
+        price: parseFloat(entry.close),
+        change: parseFloat(entry.change),
+        percent: parseFloat(entry.percent_change),
+        updated: new Date().toLocaleTimeString(),
+        fetchedAt: Date.now(),
+        source: "live"
+      };
     });
+    render();
+  } catch (e) {
+    statusEl.textContent = "batched quote request failed";
   }
-  setInterval(() => {
-    if (selected) return;
-    if (usingHouseKey) {
+}
+
+function startPolling() {
+  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage");
+  const usingHouseKey = !hasAnyRealKey;
+
+  function refreshAll() {
+    if (twelveDataKey) {
+      refreshQuotesViaPersonalBatch(tickers, twelveDataKey.key);
+    } else if (usingHouseKey) {
       refreshQuotesViaHouseBatch(tickers);
     } else {
+      // alpha vantage only, no confirmed batching support there, so this stays on the
+      // original per-key queue rather than risk it on an unverified endpoint.
       tickers.forEach(sym => {
         if (!isQuoteFresh(sym)) enqueue({ type: "quote", symbol: sym, run: (k) => fetchQuote(sym, k) });
       });
     }
+  }
+
+  refreshAll();
+  setInterval(() => {
+    if (selected) return;
+    refreshAll();
     refreshBlockColors();
-  }, Math.max(20000, usingHouseKey ? 60000 : (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "twelvedata").length, 1)));
+  }, twelveDataKey ? 45000 : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
 }
 
 function boot() {
