@@ -1083,6 +1083,7 @@ function sentimentScoreFor(symbol) {
 const QSR_NAMES = { MCD: "McDonald's", SBUX: "Starbucks", YUM: "Yum Brands", CMG: "Chipotle", WEN: "Wendy's", JACK: "Jack in the Box", DPZ: "Domino's", PZZA: "Papa John's", QSR: "Restaurant Brands International", WING: "Wingstop", SHAK: "Shake Shack", CAVA: "Cava", PTLO: "Portillo's", BROS: "Dutch Bros", DNUT: "Krispy Kreme", DENN: "Denny's", PBPB: "Potbelly", CHUY: "Chuy's", SG: "Sweetgreen", KRUS: "Kura Sushi", FAT: "FAT Brands", BFI: "BurgerFi", GTIM: "Good Times Restaurants", TAST: "Carrols Restaurant Group", LOCO: "El Pollo Loco", ARCO: "Arcos Dorados", NATH: "Nathan's Famous", FRGI: "Fiesta Restaurant Group", NDLS: "Noodles & Company", YUMC: "Yum China", CBRL: "Cracker Barrel", TXRH: "Texas Roadhouse", CAKE: "Cheesecake Factory", DRI: "Darden Restaurants", EAT: "Brinker International", BLMN: "Bloomin' Brands", DIN: "Dine Brands", FWRG: "First Watch", SYY: "Sysco", USFD: "US Foods", PFGC: "Performance Food Group", ARMK: "Aramark", ECL: "Ecolab", MIDD: "Middleby", CTAS: "Cintas", KO: "Coca-Cola", KDP: "Keurig Dr Pepper", PEP: "PepsiCo", TOST: "Toast", PAR: "PAR Technology", VYX: "NCR Voyix", XYZ: "Block" };
 
 const LEADERSHIP_TTL_MS = 30 * 24 * 60 * 60000;
+const LEADERSHIP_EMPTY_TTL_MS = 60 * 60000;
 let leadershipCache = JSON.parse(localStorage.getItem("st_leadership_cache") || "null") || {};
 let showLeadership = false;
 
@@ -1091,13 +1092,23 @@ function saveLeadershipCache() {
 }
 function isLeadershipFresh(symbol) {
   const c = leadershipCache[symbol];
-  return c && Date.now() - c.fetchedAt < LEADERSHIP_TTL_MS;
+  if (!c) return false;
+  const ttl = c.people.length > 0 ? LEADERSHIP_TTL_MS : LEADERSHIP_EMPTY_TTL_MS;
+  return Date.now() - c.fetchedAt < ttl;
 }
 
 async function fetchLeadership(symbol) {
   statusEl.textContent = "checking wikidata for " + symbol + "'s leadership";
+  // ticker symbol (P249) is documented as a qualifier on the stock exchange statement (P414),
+  // not always a standalone fact on the company itself, so check both forms, whichever
+  // matches. Missing this the first time is exactly why McDonald's came back empty.
   const sparql = `SELECT ?companyLabel ?ceoLabel ?image WHERE {
-    ?company wdt:P249 "${symbol}".
+    {
+      ?company wdt:P249 "${symbol}".
+    } UNION {
+      ?company p:P414 ?exchangeStatement.
+      ?exchangeStatement pq:P249 "${symbol}".
+    }
     OPTIONAL { ?company wdt:P169 ?ceo. }
     OPTIONAL { ?ceo wdt:P18 ?image. }
     SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
