@@ -735,11 +735,26 @@ document.getElementById("loadSyncBtn").onclick = async () => {
 };
 
 function refreshBlockColors() {
-  tickers.forEach(sym => {
-    if (!isHistoryFresh(sym, blockPeriod)) {
-      enqueue({ type: "history", symbol: sym, run: (k) => fetchHistory(sym, blockPeriod, k) });
-    }
-  });
+  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage" || k.provider === "tiingo");
+  const usingHouseKey = !hasAnyRealKey;
+  const apiRange = apiRangeFor(blockPeriod);
+  if (twelveDataKey) {
+    // this used to run its own separate, uncoordinated loop through the old one-request-
+    // per-symbol queue regardless of which key type was in use, completely blind to the
+    // batched calls and the backoff state built for quotes and chart history. that's how
+    // credits kept stacking past the per-minute limit even with every individual call
+    // correctly capped, this was a second, uncounted source of real twelve data traffic.
+    refreshHistoryViaPersonalBatch(tickers, apiRange, twelveDataKey.key);
+  } else if (usingHouseKey) {
+    refreshHistoryViaHouseBatch(tickers, apiRange);
+  } else {
+    tickers.forEach(sym => {
+      if (!isHistoryFresh(sym, blockPeriod)) {
+        enqueue({ type: "history", symbol: sym, run: (k) => fetchHistory(sym, blockPeriod, k) });
+      }
+    });
+  }
 }
 function sparklineSvg(symbol) {
   const h = history[symbol + "_1D"];
@@ -1155,11 +1170,11 @@ async function fetchHistoryAlphaVantage(symbol, uiRange, key) {
   try {
     let url, seriesKey;
     if (apiRange === "DAILY") {
-      url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=full&apikey=${key}`;
+      url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${key}`;
       seriesKey = "Time Series (Daily)";
     } else {
       const interval = ALPHA_VANTAGE_INTRADAY_INTERVAL[apiRange];
-      url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=${interval}&outputsize=full&apikey=${key}`;
+      url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=${interval}&outputsize=compact&apikey=${key}`;
       seriesKey = "Time Series (" + interval + ")";
     }
     const res = await fetch(url);
