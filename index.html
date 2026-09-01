@@ -126,9 +126,12 @@
   #keysManager .keyrow .keylabel { color: #374151; font-weight: 500; width: 62px; flex-shrink: 0; }
   #keysManager .keyrow button { font-size: 10px; padding: 3px 6px; margin-left: auto; }
   #keysManager input { font-size: 11px; padding: 6px 8px; }
+  #syncManager { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 14px; }
+  #syncManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
   .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
   .ranges button[data-action="magazine"].active { border-color: #2563eb; color: #2563eb; }
   .ranges button[data-action="secfilings"].active { border-color: #374151; color: #374151; }
+  .ranges button[data-action="insider"].active { border-color: #9333ea; color: #9333ea; }
   .ranges button[data-action="tariffs"].active { border-color: #0d9488; color: #0d9488; }
   .ranges button[data-action="commodities"].active { border-color: #b45309; color: #b45309; }
   .ranges button[data-action="leadership"].active { border-color: #4338ca; color: #4338ca; }
@@ -221,6 +224,22 @@
         <div id="providerAddRows"></div>
         <p id="keyStatusText" style="font-size:11px;color:#111827;font-weight:500;margin:8px 0 0 0;min-height:14px;"></p>
         <p style="font-size:10px;color:#9ca3af;margin:6px 0 0 0;">each service has its own add button below, tap the plus, paste that provider's key, hit add. twelve data and alpha vantage power quotes and charts, tiingo backs up the daily chart data only, no live quotes, finnhub and gnews power the 1M news button, fmp gives the 10-K button a more reliable direct source instead of routing through SEC EDGAR and a public proxy. alpha vantage is capped at 25 lookups a day per key, so it fills in as a backup rather than a main source.</p>
+      </div>
+
+      <div id="syncManager">
+        <h3>cross-device sync</h3>
+        <p style="font-size:10px;color:#9ca3af;margin:0 0 8px 0;">carries your ticker list and display preferences between devices using a short code, no account, no login. it does not carry api keys or cached price data, each device keeps those to itself.</p>
+        <div id="syncCodeDisplay" style="display:none;margin-bottom:8px;">
+          <div style="font-size:11px;color:#6b7280;">this device's sync code</div>
+          <input id="syncCodeShown" type="text" readonly style="font-size:16px;font-weight:600;letter-spacing:1px;">
+        </div>
+        <button id="createSyncBtn" style="width:100%;">create a sync code for this device</button>
+        <button id="pushSyncBtn" style="width:100%;margin-top:6px;display:none;">push this device's current setup to the code</button>
+        <div class="row" style="margin-top:10px;margin-bottom:0;">
+          <input id="syncCodeInput" type="text" placeholder="enter a code from another device">
+          <button id="loadSyncBtn">load</button>
+        </div>
+        <p id="syncStatusText" style="font-size:11px;color:#111827;font-weight:500;margin:8px 0 0 0;min-height:14px;"></p>
       </div>
     </div>
   </div>
@@ -613,6 +632,106 @@ document.getElementById("importDataInput").onchange = (e) => {
     location.reload();
   };
   reader.readAsText(file);
+};
+
+function getSyncPayload() {
+  return {
+    tickers: tickers,
+    blockPeriod: blockPeriod,
+    sortMode: localStorage.getItem("st_sort_mode") || "manual",
+    recallFilter: localStorage.getItem("st_recall_filter") === "true"
+  };
+}
+
+function applySyncPayload(data) {
+  if (Array.isArray(data.tickers) && data.tickers.length > 0) {
+    tickers = data.tickers;
+    localStorage.setItem("st_tickers", JSON.stringify(tickers));
+  }
+  if (data.blockPeriod) {
+    blockPeriod = data.blockPeriod;
+    localStorage.setItem("st_block_period", blockPeriod);
+  }
+  if (data.sortMode) localStorage.setItem("st_sort_mode", data.sortMode);
+  if (typeof data.recallFilter === "boolean") localStorage.setItem("st_recall_filter", String(data.recallFilter));
+}
+
+function setSyncStatus(msg) {
+  const el = document.getElementById("syncStatusText");
+  if (el) el.textContent = msg;
+}
+
+function showSyncCode(code) {
+  document.getElementById("syncCodeShown").value = code;
+  document.getElementById("syncCodeDisplay").style.display = "block";
+  document.getElementById("createSyncBtn").style.display = "none";
+  document.getElementById("pushSyncBtn").style.display = "block";
+}
+
+const existingSyncCode = localStorage.getItem("st_sync_code");
+if (existingSyncCode) {
+  showSyncCode(existingSyncCode);
+}
+
+document.getElementById("createSyncBtn").onclick = async () => {
+  setSyncStatus("creating a sync code...");
+  try {
+    const res = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(getSyncPayload())
+    });
+    const data = await res.json();
+    if (!data.code) {
+      setSyncStatus("could not create a sync code, try again");
+      return;
+    }
+    localStorage.setItem("st_sync_code", data.code);
+    showSyncCode(data.code);
+    setSyncStatus("sync code created, write this down, it's the only way to load this setup on another device");
+  } catch (e) {
+    setSyncStatus("sync request failed");
+  }
+};
+
+document.getElementById("pushSyncBtn").onclick = async () => {
+  const code = localStorage.getItem("st_sync_code");
+  if (!code) return;
+  setSyncStatus("pushing this device's current setup...");
+  try {
+    const res = await fetch(BACKEND_URL + "/sync/" + code, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(getSyncPayload())
+    });
+    const data = await res.json();
+    setSyncStatus(data.updated ? "pushed, this code now reflects this device's setup" : (data.error || "push failed"));
+  } catch (e) {
+    setSyncStatus("sync request failed");
+  }
+};
+
+document.getElementById("loadSyncBtn").onclick = async () => {
+  const code = document.getElementById("syncCodeInput").value.trim().toUpperCase();
+  if (!code) return;
+  setSyncStatus("loading code " + code + "...");
+  try {
+    const res = await fetch(BACKEND_URL + "/sync/" + code);
+    const data = await res.json();
+    if (data.error || !data.data) {
+      setSyncStatus(data.error || "that code did not return anything usable");
+      return;
+    }
+    if (!window.confirm("Load this code's ticker list and preferences onto this device? This replaces what's currently tracked here.")) {
+      return;
+    }
+    applySyncPayload(data.data);
+    localStorage.setItem("st_sync_code", code);
+    setSyncStatus("loaded, reloading...");
+    location.reload();
+  } catch (e) {
+    setSyncStatus("sync request failed");
+  }
 };
 
 function refreshBlockColors() {
@@ -1450,6 +1569,49 @@ async function fetchSecFilings(symbol) {
   }
 }
 
+const INSIDER_FILING_TTL_MS = 24 * 60 * 60000;
+let insiderFilingsCache = JSON.parse(localStorage.getItem("st_insider_filings_cache") || "null") || {};
+let showInsiderFilings = false;
+
+function saveInsiderFilingsCache() {
+  try { localStorage.setItem("st_insider_filings_cache", JSON.stringify(insiderFilingsCache)); } catch (e) {}
+}
+function isInsiderFilingsFresh(symbol) {
+  const f = insiderFilingsCache[symbol];
+  return f && Date.now() - f.fetchedAt < INSIDER_FILING_TTL_MS;
+}
+
+async function fetchInsiderFilings(symbol) {
+  statusEl.textContent = "checking insider filings for " + symbol;
+  try {
+    const url = BACKEND_URL + "/sec-filings?symbol=" + symbol + "&form=4";
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error || !Array.isArray(data.filings)) {
+      insiderFilingsCache[symbol] = { filings: [], fetchedAt: Date.now() };
+      saveInsiderFilingsCache();
+      statusEl.textContent = "backend returned no insider filings for " + symbol + (data.detail ? ": " + data.detail : "");
+      render();
+      return;
+    }
+    insiderFilingsCache[symbol] = { filings: data.filings, fetchedAt: Date.now() };
+    saveInsiderFilingsCache();
+    statusEl.textContent = data.filings.length + " insider filing" + (data.filings.length === 1 ? "" : "s") + " found for " + symbol + " (" + data.source + ")";
+    render();
+  } catch (e) {
+    statusEl.textContent = "backend request failed for " + symbol + ": " + (e && e.message ? e.message : "network error");
+  }
+}
+
+function toggleInsiderFilings() {
+  showInsiderFilings = !showInsiderFilings;
+  if (showInsiderFilings && !isInsiderFilingsFresh(selected)) {
+    fetchInsiderFilings(selected);
+  } else {
+    render();
+  }
+}
+
 function toggleSecFilings() {
   showSecFilings = !showSecFilings;
   if (showSecFilings && !isSecFilingsFresh(selected)) {
@@ -1955,6 +2117,7 @@ function openHistory(symbol) {
   showTariffs = false;
   showCommodities = false;
   showLeadership = false;
+  showInsiderFilings = false;
   render();
   const twelveDataKey = keys.find(k => k.provider === "twelvedata");
   const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage" || k.provider === "tiingo");
@@ -1980,6 +2143,7 @@ function closeHistory() {
   showTariffs = false;
   showCommodities = false;
   showLeadership = false;
+  showInsiderFilings = false;
   queue = queue.filter(j => j.type !== "quote");
   render();
 }
@@ -2288,6 +2452,7 @@ function render() {
         <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
         ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
         <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
+        <button data-action="insider" class="${showInsiderFilings ? "active" : ""}">insider</button>
         ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
         ${COMMODITY_PROFILES[sym] ? `<button data-action="commodities" class="${showCommodities ? "active" : ""}">commodities</button>` : ""}
         <button data-action="leadership" class="${showLeadership ? "active" : ""}">leadership</button>
@@ -2376,6 +2541,20 @@ function render() {
           }).join("") + `</div>`;
         }
       }
+      if (showInsiderFilings) {
+        const inf = insiderFilingsCache[sym];
+        if (!inf) {
+          inner += `<div class="newsPanel"><p class="newsStatus">checking SEC EDGAR</p></div>`;
+        } else if (inf.filings.length === 0) {
+          inner += `<div class="newsPanel"><p class="newsStatus">no form 4 insider filings found in the last window on record</p></div>`;
+        } else {
+          inner += `<div class="newsPanel">` + inf.filings.map(f => {
+            const openBtn = f.filingUrl ? `<a class="viewFilingBtn" href="${f.filingUrl}" target="_blank" rel="noopener" style="font-size:10px;padding:2px 8px;margin-left:6px;border:1px solid #d1d5db;border-radius:6px;color:#111827;text-decoration:none;display:inline-block;">view filing</a>` : "";
+            const person = f.reportingPerson ? f.reportingPerson : "reporting person not parsed from this filing's title";
+            return `<div class="newsItem"><div class="newsDate">${f.filingDate} &middot; form ${f.form}${openBtn}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${person}</div></div>`;
+          }).join("") + `</div>`;
+        }
+      }
       if (showTariffs) {
         if (!tariffCache) {
           inner += `<div class="newsPanel"><p class="newsStatus">checking federal register</p></div>`;
@@ -2451,6 +2630,8 @@ function render() {
       if (magBtn) magBtn.onclick = (e) => { e.stopPropagation(); toggleMagazine(); };
       const secBtn = card.querySelector('[data-action="secfilings"]');
       if (secBtn) secBtn.onclick = (e) => { e.stopPropagation(); toggleSecFilings(); };
+      const insiderBtn = card.querySelector('[data-action="insider"]');
+      if (insiderBtn) insiderBtn.onclick = (e) => { e.stopPropagation(); toggleInsiderFilings(); };
       const tariffBtn = card.querySelector('[data-action="tariffs"]');
       if (tariffBtn) tariffBtn.onclick = (e) => { e.stopPropagation(); toggleTariffs(); };
       const commodityBtn = card.querySelector('[data-action="commodities"]');
