@@ -767,7 +767,11 @@ function refreshBlockColors() {
   }
 }
 function sparklineSvg(symbol) {
-  const h = history[symbol + "_1D"];
+  // 1D history only ever gets fetched one ticker at a time, when someone actually opens
+  // that specific chart, it's never part of the pre-warmed batch. 1W is the default block
+  // period though, and that range gets pre-warmed for every tracked ticker in the same
+  // batch that populates everything else, so it's what's actually sitting there early on.
+  const h = history[symbol + "_1W"];
   if (!h || !h.points || h.points.length < 2) return "";
   const points = h.points.slice(-48);
   const closes = points.map(p => p.close);
@@ -782,7 +786,7 @@ function sparklineSvg(symbol) {
   }).join(" ");
   const up = closes[closes.length - 1] >= closes[0];
   const color = up ? "#16a34a" : "#dc2626";
-  return `<svg class="sparkline" width="${w}" height="${ht}" viewBox="0 0 ${w} ${ht}" title="last known 1D trend, cached"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  return `<svg class="sparkline" width="${w}" height="${ht}" viewBox="0 0 ${w} ${ht}" title="last known 1W trend, cached"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
 function blockColorFor(sym) {
@@ -2691,10 +2695,8 @@ function render() {
   const twelveDataKeysForFooter = keys.filter(k => k.provider === "twelvedata");
   const usingHouseKeyForFooter = !keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage");
   if (twelveDataKeysForFooter.length > 0) {
-    const totalBudget = 700 * twelveDataKeysForFooter.length;
-    const minutesBetween = Math.max(5, Math.round(tickers.length * (16 * 60) / totalBudget));
     const keyWord = twelveDataKeysForFooter.length === 1 ? "your own twelve data key" : "your " + twelveDataKeysForFooter.length + " twelve data keys, rotated across each other";
-    footEl.textContent = tickers.length + " tickers on " + keyWord + ", auto-refreshing about every " + minutesBetween + " minutes to stay inside the free tier's 800 credit daily limit per key";
+    footEl.textContent = tickers.length + " tickers on " + keyWord + ", auto-refreshing about every 2 minutes, backs off automatically on any key that runs into its daily limit";
   } else if (usingHouseKeyForFooter) {
     footEl.textContent = tickers.length + " tickers via the shared key, batched into one request, refreshes about every minute";
   } else {
@@ -2852,21 +2854,20 @@ function startPolling() {
 
   // a personal twelve data key has no cache sitting in front of it the way the house key
   // does, so every refresh spends real credits against the account's own 800-per-day budget,
-  // one credit per symbol regardless of how the request is batched. each additional key adds
-  // its own separate 800-per-day allowance, so the interval shortens proportionally, three
-  // keys really do mean three times the throughput, not the same one key doing all the work
-  // while the other two sit unused.
-  const TWELVE_DATA_DAILY_QUOTE_BUDGET_PER_KEY = 700;
-  const ASSUMED_ACTIVE_HOURS = 16;
-  const totalDailyBudget = TWELVE_DATA_DAILY_QUOTE_BUDGET_PER_KEY * Math.max(twelveDataKeys.length, 1);
-  const personalKeyIntervalMs = Math.max(5 * 60000, Math.round(tickers.length * (ASSUMED_ACTIVE_HOURS * 3600000) / totalDailyBudget));
+  // one credit per symbol regardless of how the request is batched. this used to preemptively
+  // ration that budget across a whole assumed active window, which meant a very long wait
+  // between refreshes even early in the day when plenty of budget was still left. the per-key
+  // backoff built alongside this already catches a key genuinely running dry and stops calling
+  // it automatically, so there's no real need to also throttle in advance, this just refreshes
+  // at a fast, fixed pace and lets the backoff handle it if a key actually runs out.
+  const PERSONAL_KEY_REFRESH_MS = 2 * 60000;
 
   refreshAll();
   setInterval(() => {
     if (selected) return;
     refreshAll();
     refreshBlockColors();
-  }, twelveDataKeys.length > 0 ? personalKeyIntervalMs : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
+  }, twelveDataKeys.length > 0 ? PERSONAL_KEY_REFRESH_MS : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
 }
 
 function boot() {
