@@ -151,6 +151,7 @@
   <div class="headrow" style="margin-bottom:14px;">
     <button class="hamburger" id="infoBtnSetup" title="about this app">&#9432;</button>
     <h1 style="margin:0;">stock tracker setup</h1>
+    <span id="appVersionBadgeSetup" style="font-size:10px;color:#9ca3af;font-weight:normal;margin-left:6px;"></span>
   </div>
   <p>enter one or more free twelve data api keys, one per line, for the fastest and most reliable refresh across your ticker list, each key gets its own 8 requests per minute allowance. or skip this entirely and use the shared key built into the app instead, slower since it's split across everyone using it without their own key, but works with zero setup.</p>
   <textarea id="keyInput" placeholder="api key 1&#10;api key 2&#10;api key 3"></textarea>
@@ -188,6 +189,7 @@
     <button class="hamburger" id="hamburgerBtn">&#9776;</button>
     <button class="hamburger" id="infoBtn" title="about this app">&#9432;</button>
     <h1 style="margin:0;color:#ea580c;" title="Orange phone code">qsr tracker</h1>
+    <span id="appVersionBadge" style="font-size:10px;color:#9ca3af;font-weight:normal;margin-left:6px;"></span>
     <div id="blockMenu">
       <h3>block color average</h3>
       <div class="opts" id="periodOpts">
@@ -371,6 +373,14 @@ function saveNewsCache() {
 
 const setupEl = document.getElementById("setup");
 const appEl = document.getElementById("app");
+
+// matches the tickerchartNN.html file number for whichever build this actually is, so
+// it's a plain glance instead of guessing whether a fix has actually deployed yet.
+const APP_VERSION = "92";
+const versionBadge = document.getElementById("appVersionBadge");
+const versionBadgeSetup = document.getElementById("appVersionBadgeSetup");
+if (versionBadge) versionBadge.textContent = "build " + APP_VERSION;
+if (versionBadgeSetup) versionBadgeSetup.textContent = "build " + APP_VERSION;
 const gridEl = document.getElementById("grid");
 const statusEl = document.getElementById("status");
 const footEl = document.getElementById("foot");
@@ -735,17 +745,17 @@ document.getElementById("loadSyncBtn").onclick = async () => {
 };
 
 function refreshBlockColors() {
-  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const twelveDataKeys = keys.filter(k => k.provider === "twelvedata").map(k => k.key);
   const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage" || k.provider === "tiingo");
   const usingHouseKey = !hasAnyRealKey;
   const apiRange = apiRangeFor(blockPeriod);
-  if (twelveDataKey) {
+  if (twelveDataKeys.length > 0) {
     // this used to run its own separate, uncoordinated loop through the old one-request-
     // per-symbol queue regardless of which key type was in use, completely blind to the
     // batched calls and the backoff state built for quotes and chart history. that's how
     // credits kept stacking past the per-minute limit even with every individual call
     // correctly capped, this was a second, uncounted source of real twelve data traffic.
-    refreshHistoryViaPersonalBatch(tickers, apiRange, twelveDataKey.key);
+    refreshHistoryViaPersonalBatch(tickers, apiRange, twelveDataKeys);
   } else if (usingHouseKey) {
     refreshHistoryViaHouseBatch(tickers, apiRange);
   } else {
@@ -2087,7 +2097,7 @@ async function fetchHistoryChunk(chunk, apiRange, cfg, key) {
     const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${chunk.join(",")}&interval=${cfg.interval}&outputsize=${cfg.size}&timezone=UTC&apikey=${key}`);
     const json = await res.json();
     if (json.code === 429 || json.status === "error") {
-      applyPersonalKeyBackoff(json.message);
+      applyPersonalKeyBackoff(key, json.message);
       return false;
     }
     const bySymbol = chunk.length === 1 && json.values ? { [chunk[0]]: json } : json;
@@ -2106,17 +2116,22 @@ async function fetchHistoryChunk(chunk, apiRange, cfg, key) {
   }
 }
 
-// same credit-per-symbol exposure as quotes, chunked the same way for the same reason.
-async function refreshHistoryViaPersonalBatch(symbols, apiRange, key) {
-  if (checkPersonalKeyBackoff()) return;
+// same credit-per-symbol exposure as quotes, chunked and rotated across all available
+// keys the same way for the same reason.
+async function refreshHistoryViaPersonalBatch(symbols, apiRange, allKeys) {
   const needed = symbols.filter(s => !isHistoryFreshRange(s, apiRange));
   if (needed.length === 0) return;
   const cfg = API_RANGE_MAP[apiRange];
   const chunks = chunkArray(needed, FREE_TIER_CREDITS_PER_MINUTE);
+  let keyIdx = 0;
   for (let i = 0; i < chunks.length; i++) {
-    const ok = await fetchHistoryChunk(chunks[i], apiRange, cfg, key);
-    if (!ok) return;
-    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
+    const picked = nextAvailablePersonalKey(allKeys, keyIdx);
+    if (!picked) return;
+    keyIdx = picked.idx + 1;
+    const reusedKeyThisRun = i >= allKeys.length;
+    if (reusedKeyThisRun) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
+    const ok = await fetchHistoryChunk(chunks[i], apiRange, cfg, picked.key);
+    if (!ok) continue;
   }
 }
 
@@ -2134,13 +2149,13 @@ function openHistory(symbol) {
   showLeadership = false;
   showInsiderFilings = false;
   render();
-  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const twelveDataKeys = keys.filter(k => k.provider === "twelvedata").map(k => k.key);
   const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage" || k.provider === "tiingo");
   const usingHouseKey = !hasAnyRealKey;
-  if (twelveDataKey) {
+  if (twelveDataKeys.length > 0) {
     // pre-warm every tracked ticker's daily history in this same request, not just the one
     // being opened right now, so tapping into a different ticker later finds it already cached.
-    refreshHistoryViaPersonalBatch(tickers, "DAILY", twelveDataKey.key);
+    refreshHistoryViaPersonalBatch(tickers, "DAILY", twelveDataKeys);
   } else if (usingHouseKey) {
     refreshHistoryViaHouseBatch(tickers, "DAILY");
   } else if (!isHistoryFresh(symbol, "3M")) {
@@ -2673,11 +2688,13 @@ function render() {
       requestAnimationFrame(() => drawChart(points, markers));
     }
   }
-  const twelveDataKeyForFooter = keys.find(k => k.provider === "twelvedata");
+  const twelveDataKeysForFooter = keys.filter(k => k.provider === "twelvedata");
   const usingHouseKeyForFooter = !keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage");
-  if (twelveDataKeyForFooter) {
-    const minutesBetween = Math.max(5, Math.round(tickers.length * (16 * 60) / 700));
-    footEl.textContent = tickers.length + " tickers on your own twelve data key, auto-refreshing about every " + minutesBetween + " minutes to stay inside the free tier's 800 credit daily limit";
+  if (twelveDataKeysForFooter.length > 0) {
+    const totalBudget = 700 * twelveDataKeysForFooter.length;
+    const minutesBetween = Math.max(5, Math.round(tickers.length * (16 * 60) / totalBudget));
+    const keyWord = twelveDataKeysForFooter.length === 1 ? "your own twelve data key" : "your " + twelveDataKeysForFooter.length + " twelve data keys, rotated across each other";
+    footEl.textContent = tickers.length + " tickers on " + keyWord + ", auto-refreshing about every " + minutesBetween + " minutes to stay inside the free tier's 800 credit daily limit per key";
   } else if (usingHouseKeyForFooter) {
     footEl.textContent = tickers.length + " tickers via the shared key, batched into one request, refreshes about every minute";
   } else {
@@ -2725,29 +2742,42 @@ function chunkArray(arr, size) {
   return chunks;
 }
 
-// once twelve data says the account is out of credits, every immediate retry is doomed to
-// fail the same way, whether triggered by the refresh timer or by tapping into a different
-// ticker's chart. without remembering that, the app just keeps calling and keeps failing,
-// which is exactly the growing wall of error messages this exists to stop. a per-minute
-// limit clears itself quickly, a daily limit needs real hours, so they get different backoffs.
-let personalKeyBackoffUntil = 0;
-let personalKeyBackoffMessage = "";
+// once twelve data says a specific key is out of credits, every immediate retry on that
+// same key is doomed to fail the same way, whether triggered by the refresh timer or by
+// tapping into a different ticker's chart. without remembering that, the app just keeps
+// calling and keeps failing, which is exactly the growing wall of error messages this
+// exists to stop. this is tracked per key, not globally, so one exhausted key doesn't
+// block the others when more than one is entered. a per-minute limit clears itself
+// quickly, a daily limit needs real hours, so they get different backoffs.
+let personalKeyBackoffUntil = {};
+let personalKeyBackoffMessage = {};
 
-function checkPersonalKeyBackoff() {
-  if (Date.now() < personalKeyBackoffUntil) {
-    statusEl.textContent = personalKeyBackoffMessage;
+function checkPersonalKeyBackoff(key) {
+  if (Date.now() < (personalKeyBackoffUntil[key] || 0)) {
+    statusEl.textContent = personalKeyBackoffMessage[key];
     return true;
   }
   return false;
 }
 
-function applyPersonalKeyBackoff(message) {
+function applyPersonalKeyBackoff(key, message) {
   const isDailyLimit = /for the day/i.test(message || "");
   const backoffMs = isDailyLimit ? 3 * 60 * 60000 : 65000;
-  personalKeyBackoffUntil = Date.now() + backoffMs;
+  personalKeyBackoffUntil[key] = Date.now() + backoffMs;
   const resumeText = isDailyLimit ? "resuming in a few hours" : "resuming in about a minute";
-  personalKeyBackoffMessage = "twelve data: daily or per-minute limit reached, " + resumeText + ", not retrying until then";
-  statusEl.textContent = personalKeyBackoffMessage;
+  const label = "key ending " + key.slice(-4);
+  personalKeyBackoffMessage[key] = "twelve data: " + label + " hit its limit, " + resumeText + ", not retrying that key until then";
+  statusEl.textContent = personalKeyBackoffMessage[key];
+}
+
+// picks the next available key in rotation, skipping any currently in backoff, so a
+// three-key setup actually uses all three instead of only ever touching the first one.
+function nextAvailablePersonalKey(allKeys, startIdx) {
+  for (let i = 0; i < allKeys.length; i++) {
+    const idx = (startIdx + i) % allKeys.length;
+    if (!checkPersonalKeyBackoff(allKeys[idx])) return { key: allKeys[idx], idx: idx };
+  }
+  return null;
 }
 
 async function fetchQuoteChunk(chunk, key) {
@@ -2755,7 +2785,7 @@ async function fetchQuoteChunk(chunk, key) {
     const res = await fetch(`https://api.twelvedata.com/quote?symbol=${chunk.join(",")}&apikey=${key}`);
     const json = await res.json();
     if (json.code === 429 || json.status === "error") {
-      applyPersonalKeyBackoff(json.message);
+      applyPersonalKeyBackoff(key, json.message);
       return false;
     }
     const bySymbol = chunk.length === 1 && json.symbol ? { [chunk[0]]: json } : json;
@@ -2783,26 +2813,32 @@ async function fetchQuoteChunk(chunk, key) {
 // single oversized batch can blow straight through the free tier's per-minute credit limit
 // in one call. chunking to that same limit keeps the real win, far fewer requests than one
 // per symbol, without tripping the ceiling that a single 52-symbol batch would hit instantly.
-async function refreshQuotesViaPersonalBatch(symbols, key) {
-  if (checkPersonalKeyBackoff()) return;
+// each chunk rotates to the next available key, so multiple keys actually multiply the
+// real throughput instead of two of them sitting unused while everything goes through one.
+async function refreshQuotesViaPersonalBatch(symbols, allKeys) {
   const needed = symbols.filter(s => !isQuoteFresh(s));
   if (needed.length === 0) return;
   const chunks = chunkArray(needed, FREE_TIER_CREDITS_PER_MINUTE);
+  let keyIdx = 0;
   for (let i = 0; i < chunks.length; i++) {
-    const ok = await fetchQuoteChunk(chunks[i], key);
-    if (!ok) return;
-    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
+    const picked = nextAvailablePersonalKey(allKeys, keyIdx);
+    if (!picked) return; // every key is currently in backoff
+    keyIdx = picked.idx + 1;
+    const reusedKeyThisRun = i >= allKeys.length;
+    if (reusedKeyThisRun) await new Promise(r => setTimeout(r, KEY_COOLDOWN_MS));
+    const ok = await fetchQuoteChunk(chunks[i], picked.key);
+    if (!ok) continue; // this key just hit backoff, the next chunk will rotate past it
   }
 }
 
 function startPolling() {
-  const twelveDataKey = keys.find(k => k.provider === "twelvedata");
+  const twelveDataKeys = keys.filter(k => k.provider === "twelvedata").map(k => k.key);
   const hasAnyRealKey = keys.some(k => k.provider === "twelvedata" || k.provider === "alphavantage");
   const usingHouseKey = !hasAnyRealKey;
 
   function refreshAll() {
-    if (twelveDataKey) {
-      refreshQuotesViaPersonalBatch(tickers, twelveDataKey.key);
+    if (twelveDataKeys.length > 0) {
+      refreshQuotesViaPersonalBatch(tickers, twelveDataKeys);
     } else if (usingHouseKey) {
       refreshQuotesViaHouseBatch(tickers);
     } else {
@@ -2816,21 +2852,21 @@ function startPolling() {
 
   // a personal twelve data key has no cache sitting in front of it the way the house key
   // does, so every refresh spends real credits against the account's own 800-per-day budget,
-  // one credit per symbol regardless of how the request is batched. refreshing a 52-ticker
-  // list every 45 seconds burns that entire daily budget in under two hours, which is what
-  // actually happened. this spaces refreshes out to spend at most about 700 of the 800 daily
-  // credits on quotes across a 16 hour active window, leaving real room for chart opens and
-  // everything else that also draws from the same account.
-  const TWELVE_DATA_DAILY_QUOTE_BUDGET = 700;
+  // one credit per symbol regardless of how the request is batched. each additional key adds
+  // its own separate 800-per-day allowance, so the interval shortens proportionally, three
+  // keys really do mean three times the throughput, not the same one key doing all the work
+  // while the other two sit unused.
+  const TWELVE_DATA_DAILY_QUOTE_BUDGET_PER_KEY = 700;
   const ASSUMED_ACTIVE_HOURS = 16;
-  const personalKeyIntervalMs = Math.max(5 * 60000, Math.round(tickers.length * (ASSUMED_ACTIVE_HOURS * 3600000) / TWELVE_DATA_DAILY_QUOTE_BUDGET));
+  const totalDailyBudget = TWELVE_DATA_DAILY_QUOTE_BUDGET_PER_KEY * Math.max(twelveDataKeys.length, 1);
+  const personalKeyIntervalMs = Math.max(5 * 60000, Math.round(tickers.length * (ASSUMED_ACTIVE_HOURS * 3600000) / totalDailyBudget));
 
   refreshAll();
   setInterval(() => {
     if (selected) return;
     refreshAll();
     refreshBlockColors();
-  }, twelveDataKey ? personalKeyIntervalMs : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
+  }, twelveDataKeys.length > 0 ? personalKeyIntervalMs : usingHouseKey ? 60000 : Math.max(20000, (tickers.length * KEY_COOLDOWN_MS) / Math.max(keys.filter(k => k.provider === "alphavantage").length, 1)));
 }
 
 function boot() {
