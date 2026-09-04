@@ -130,6 +130,7 @@
   #syncManager h3 { font-size: 12px; font-weight: 500; margin: 0 0 6px 0; }
   .ranges button[data-action="news"].active { border-color: #7c3aed; color: #7c3aed; }
   .ranges button[data-action="magazine"].active { border-color: #2563eb; color: #2563eb; }
+  .ranges button[data-action="foodnetwork"].active { border-color: #db2777; color: #db2777; }
   .ranges button[data-action="secfilings"].active { border-color: #374151; color: #374151; }
   .ranges button[data-action="insider"].active { border-color: #9333ea; color: #9333ea; }
   .ranges button[data-action="tariffs"].active { border-color: #0d9488; color: #0d9488; }
@@ -321,6 +322,8 @@ let showNews = false;
 let showRecalls = false;
 let showMagazine = false;
 let magazineCache = JSON.parse(localStorage.getItem("st_magazine_cache") || "null") || null;
+let showFoodNetwork = false;
+let foodNetworkCache = JSON.parse(localStorage.getItem("st_foodnetwork_cache") || "null") || null;
 const MAGAZINE_TTL_MS = 60 * 60000;
 let newsCache = JSON.parse(localStorage.getItem("st_news_cache") || "null") || {};
 const NEWS_TTL_MS = 30 * 60000;
@@ -1887,6 +1890,50 @@ function toggleMagazine() {
   }
 }
 
+const FOOD_NETWORK_TTL_MS = 60 * 60000;
+function isFoodNetworkFresh() {
+  return foodNetworkCache && Date.now() - foodNetworkCache.fetchedAt < FOOD_NETWORK_TTL_MS;
+}
+
+async function fetchFoodNetworkFeed() {
+  statusEl.textContent = "checking Food Network feed";
+  try {
+    const res = await fetch(BACKEND_URL + "/foodnetwork");
+    const data = await res.json();
+    if (!data.articles || !Array.isArray(data.articles)) {
+      statusEl.textContent = "Food Network feed unavailable right now";
+      return;
+    }
+    foodNetworkCache = { articles: data.articles, fetchedAt: Date.now() };
+    try { localStorage.setItem("st_foodnetwork_cache", JSON.stringify(foodNetworkCache)); } catch (e) {}
+    statusEl.textContent = "Food Network feed updated, " + data.articles.length + " articles in the archive (" + data.source + ")";
+    render();
+  } catch (e) {
+    statusEl.textContent = "Food Network feed request failed";
+  }
+}
+
+// reuses the same ticker to company-name map magazine matching already uses, since matching
+// by company name doesn't care which publisher the article came from.
+function foodNetworkArticlesFor(symbol) {
+  if (!foodNetworkCache) return [];
+  const names = MAGAZINE_MATCH_NAMES[symbol];
+  if (!names) return [];
+  return foodNetworkCache.articles.filter(a => {
+    const t = a.title.toLowerCase();
+    return names.some(n => t.includes(n));
+  });
+}
+
+function toggleFoodNetwork() {
+  showFoodNetwork = !showFoodNetwork;
+  if (showFoodNetwork && !isFoodNetworkFresh()) {
+    fetchFoodNetworkFeed();
+  } else {
+    render();
+  }
+}
+
 function toggleRecalls() {
   showRecalls = !showRecalls;
   if (showRecalls && !isRecallsFresh(selected)) {
@@ -2147,6 +2194,7 @@ function openHistory(symbol) {
   showNews = false;
   showRecalls = false;
   showMagazine = false;
+  showFoodNetwork = false;
   showSecFilings = false;
   showTariffs = false;
   showCommodities = false;
@@ -2173,6 +2221,7 @@ function closeHistory() {
   showNews = false;
   showRecalls = false;
   showMagazine = false;
+  showFoodNetwork = false;
   showSecFilings = false;
   showTariffs = false;
   showCommodities = false;
@@ -2485,6 +2534,7 @@ function render() {
         ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
         <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
         ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
+        ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="foodnetwork" class="${showFoodNetwork ? "active" : ""}">food network</button>` : ""}
         <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
         <button data-action="insider" class="${showInsiderFilings ? "active" : ""}">insider</button>
         ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
@@ -2556,6 +2606,23 @@ function render() {
               const c = classifyArticleText(a.title + " " + a.snippet);
               const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
               return `<div class="newsItem"><div class="newsDate">${d} &middot; QSR Magazine <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
+            }).join("") + `</div>`;
+          }
+        }
+      }
+      if (showFoodNetwork) {
+        if (!foodNetworkCache) {
+          inner += `<div class="newsPanel"><p class="newsStatus">loading Food Network feed</p></div>`;
+        } else {
+          const matched = foodNetworkArticlesFor(sym);
+          if (matched.length === 0) {
+            inner += `<div class="newsPanel"><p class="newsStatus">no Food Network articles mention this chain in the last 30 days</p></div>`;
+          } else {
+            inner += `<div class="newsPanel">` + matched.map(a => {
+              const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
+              const c = classifyArticleText(a.title + " " + a.snippet);
+              const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
+              return `<div class="newsItem"><div class="newsDate">${d} &middot; Food Network <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
             }).join("") + `</div>`;
           }
         }
@@ -2662,6 +2729,8 @@ function render() {
       if (recallsBtn) recallsBtn.onclick = (e) => { e.stopPropagation(); toggleRecalls(); };
       const magBtn = card.querySelector('[data-action="magazine"]');
       if (magBtn) magBtn.onclick = (e) => { e.stopPropagation(); toggleMagazine(); };
+      const fnBtn = card.querySelector('[data-action="foodnetwork"]');
+      if (fnBtn) fnBtn.onclick = (e) => { e.stopPropagation(); toggleFoodNetwork(); };
       const secBtn = card.querySelector('[data-action="secfilings"]');
       if (secBtn) secBtn.onclick = (e) => { e.stopPropagation(); toggleSecFilings(); };
       const insiderBtn = card.querySelector('[data-action="insider"]');
