@@ -956,7 +956,7 @@ const appEl = document.getElementById("app");
 // matches the tickerchartNN.html file number for whichever build this actually is, so
 // it's a plain glance instead of guessing whether a fix has actually deployed yet. kept
 // at the very bottom of the page, out of the way, not in the header.
-const APP_VERSION = "100";
+const APP_VERSION = "101";
 const versionFooter = document.getElementById("appVersionFooter");
 if (versionFooter) versionFooter.textContent = "build " + APP_VERSION;
 const versionFooterSetup = document.getElementById("appVersionFooterSetup");
@@ -2021,6 +2021,28 @@ const LEADERSHIP_EMPTY_TTL_MS = 60 * 60000;
 let leadershipCache = JSON.parse(localStorage.getItem("st_leadership_cache") || "null") || {};
 let showLeadership = false;
 
+// wikidata sometimes returns a wrong or unrelated match for a given ticker, a place or a
+// fictional character instead of a real executive, since the match is only as good as
+// whatever's actually recorded there. rather than distrust the whole feature, a wrong
+// entry can be dismissed individually and it stays dismissed, even after the cache
+// refreshes and would otherwise bring the same wrong answer back.
+let dismissedLeaders = JSON.parse(localStorage.getItem("st_dismissed_leaders") || "null") || {};
+function saveDismissedLeaders() {
+  try { localStorage.setItem("st_dismissed_leaders", JSON.stringify(dismissedLeaders)); } catch (e) {}
+}
+function dismissLeader(symbol, name) {
+  if (!dismissedLeaders[symbol]) dismissedLeaders[symbol] = [];
+  if (!dismissedLeaders[symbol].includes(name)) dismissedLeaders[symbol].push(name);
+  saveDismissedLeaders();
+  render();
+}
+function visibleLeadersFor(symbol) {
+  const c = leadershipCache[symbol];
+  if (!c) return null;
+  const dismissed = dismissedLeaders[symbol] || [];
+  return c.people.filter(p => !dismissed.includes(p.name));
+}
+
 function saveLeadershipCache() {
   try { localStorage.setItem("st_leadership_cache", JSON.stringify(leadershipCache)); } catch (e) {}
 }
@@ -2512,7 +2534,6 @@ async function fetchMagazineFeed() {
     }
     magazineCache = { articles: data.articles, fetchedAt: Date.now() };
     try { localStorage.setItem("st_magazine_cache", JSON.stringify(magazineCache)); } catch (e) {}
-    statusEl.textContent = "QSR Magazine feed updated, " + data.articles.length + " articles in the archive (" + data.source + ")";
     render();
   } catch (e) {
     statusEl.textContent = "QSR Magazine feed request failed";
@@ -2530,7 +2551,7 @@ function magazineArticlesFor(symbol) {
 }
 
 function magazineMarkersFor(symbol, points) {
-  const articles = magazineArticlesFor(symbol);
+  const articles = combinedMagazineArticlesFor(symbol);
   if (articles.length === 0 || !points || points.length === 0) return [];
   const buckets = {};
   articles.forEach(a => {
@@ -2552,15 +2573,6 @@ function magazineMarkersFor(symbol, points) {
   });
 }
 
-function toggleMagazine() {
-  showMagazine = !showMagazine;
-  if (showMagazine && !isMagazineFresh()) {
-    fetchMagazineFeed();
-  } else {
-    render();
-  }
-}
-
 const FOOD_NETWORK_TTL_MS = 60 * 60000;
 function isFoodNetworkFresh() {
   return foodNetworkCache && Date.now() - foodNetworkCache.fetchedAt < FOOD_NETWORK_TTL_MS;
@@ -2577,7 +2589,6 @@ async function fetchFoodNetworkFeed() {
     }
     foodNetworkCache = { articles: data.articles, fetchedAt: Date.now() };
     try { localStorage.setItem("st_foodnetwork_cache", JSON.stringify(foodNetworkCache)); } catch (e) {}
-    statusEl.textContent = "Food Network feed updated, " + data.articles.length + " articles in the archive (" + data.source + ")";
     render();
   } catch (e) {
     statusEl.textContent = "Food Network feed request failed";
@@ -2596,13 +2607,21 @@ function foodNetworkArticlesFor(symbol) {
   });
 }
 
-function toggleFoodNetwork() {
-  showFoodNetwork = !showFoodNetwork;
-  if (showFoodNetwork && !isFoodNetworkFresh()) {
-    fetchFoodNetworkFeed();
-  } else {
-    render();
-  }
+// one combined, chronological list from both publishers, each article still tagged with
+// its real source so the two aren't mistaken for one feed, they're just shown together
+// instead of behind two separate buttons.
+function combinedMagazineArticlesFor(symbol) {
+  const fromMag = magazineArticlesFor(symbol).map(a => ({ ...a, sourceLabel: "QSR Magazine" }));
+  const fromFN = foodNetworkArticlesFor(symbol).map(a => ({ ...a, sourceLabel: "Food Network" }));
+  return fromMag.concat(fromFN).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function toggleMagazine() {
+  showMagazine = !showMagazine;
+  if (!showMagazine) { render(); return; }
+  if (!isMagazineFresh()) fetchMagazineFeed();
+  if (!isFoodNetworkFresh()) fetchFoodNetworkFeed();
+  render();
 }
 
 function toggleRecalls() {
@@ -3204,8 +3223,7 @@ function render() {
       <div class="ranges">
         ${selectedRange === "1M" ? `<button data-action="news" class="${showNews ? "active" : ""}">news</button>` : ""}
         <button data-action="recalls" class="${showRecalls ? "active" : ""}">recalls</button>
-        ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">qsr mag</button>` : ""}
-        ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="foodnetwork" class="${showFoodNetwork ? "active" : ""}">food network</button>` : ""}
+        ${MAGAZINE_MATCH_NAMES[sym] ? `<button data-action="magazine" class="${showMagazine ? "active" : ""}">magazine</button>` : ""}
         <button data-action="secfilings" class="${showSecFilings ? "active" : ""}">10-K</button>
         <button data-action="insider" class="${showInsiderFilings ? "active" : ""}">insider</button>
         ${INGREDIENT_KEYWORDS[sym] ? `<button data-action="tariffs" class="${showTariffs ? "active" : ""}">tariffs</button>` : ""}
@@ -3265,35 +3283,18 @@ function render() {
         }
       }
       if (showMagazine) {
-        if (!magazineCache) {
-          inner += `<div class="newsPanel"><p class="newsStatus">loading QSR Magazine feed</p></div>`;
+        if (!magazineCache && !foodNetworkCache) {
+          inner += `<div class="newsPanel"><p class="newsStatus">loading QSR Magazine and Food Network feeds</p></div>`;
         } else {
-          const matched = magazineArticlesFor(sym);
+          const matched = combinedMagazineArticlesFor(sym);
           if (matched.length === 0) {
-            inner += `<div class="newsPanel"><p class="newsStatus">no QSR Magazine articles mention this chain in the last 30 days</p></div>`;
+            inner += `<div class="newsPanel"><p class="newsStatus">no magazine articles mention this chain in the last 30 days</p></div>`;
           } else {
             inner += `<div class="newsPanel">` + matched.map(a => {
               const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
               const c = classifyArticleText(a.title + " " + a.snippet);
               const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
-              return `<div class="newsItem"><div class="newsDate">${d} &middot; QSR Magazine <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
-            }).join("") + `</div>`;
-          }
-        }
-      }
-      if (showFoodNetwork) {
-        if (!foodNetworkCache) {
-          inner += `<div class="newsPanel"><p class="newsStatus">loading Food Network feed</p></div>`;
-        } else {
-          const matched = foodNetworkArticlesFor(sym);
-          if (matched.length === 0) {
-            inner += `<div class="newsPanel"><p class="newsStatus">no Food Network articles mention this chain in the last 30 days</p></div>`;
-          } else {
-            inner += `<div class="newsPanel">` + matched.map(a => {
-              const d = new Date(a.timestamp * 1000).toISOString().slice(0, 10);
-              const c = classifyArticleText(a.title + " " + a.snippet);
-              const tagLabel = c.verdict === "positive" ? "+ " + c.posHits[0] : c.verdict === "negative" ? "- " + c.negHits[0] : "neutral";
-              return `<div class="newsItem"><div class="newsDate">${d} &middot; Food Network <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
+              return `<div class="newsItem"><div class="newsDate">${d} &middot; ${a.sourceLabel} <span class="articleTag ${c.verdict}">${tagLabel}</span></div><div class="newsHeadline">${a.title}</div><div class="newsHeadline" style="color:#6b7280;font-size:11px;">${a.snippet}</div></div>`;
             }).join("") + `</div>`;
           }
         }
@@ -3371,14 +3372,18 @@ function render() {
       }
       if (showLeadership) {
         const lc = leadershipCache[sym];
+        const visiblePeople = visibleLeadersFor(sym);
         if (!lc) {
           inner += `<div class="newsPanel"><p class="newsStatus">checking wikidata</p></div>`;
-        } else if (lc.people.length === 0) {
-          inner += `<div class="newsPanel"><p class="newsStatus">wikidata has no listed chief executive for this ticker</p></div>`;
+        } else if (!visiblePeople || visiblePeople.length === 0) {
+          const wasDismissed = lc.people.length > 0 && (!visiblePeople || visiblePeople.length === 0);
+          const msg = wasDismissed ? "no leadership shown, dismissed as incorrect" : "wikidata has no listed chief executive for this ticker";
+          inner += `<div class="newsPanel"><p class="newsStatus">${msg}</p></div>`;
         } else {
-          inner += `<div class="newsPanel">` + lc.people.map(p => {
+          inner += `<div class="newsPanel">` + visiblePeople.map(p => {
             const img = p.image ? `<img src="${p.image}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">` : "";
-            return `<div class="newsItem" style="display:flex;align-items:center;">${img}<div><div class="newsHeadline">${p.name}</div><div class="newsDate">Chief Executive Officer &middot; ${p.companyName}</div></div></div>`;
+            const safeName = p.name.replace(/"/g, "&quot;");
+            return `<div class="newsItem" style="display:flex;align-items:center;">${img}<div style="flex:1;"><div class="newsHeadline">${p.name}</div><div class="newsDate">Chief Executive Officer &middot; ${p.companyName}</div></div><button class="dismissLeaderBtn" data-symbol="${sym}" data-name="${safeName}" title="not correct, hide this" style="border:1px solid #d1d5db;border-radius:6px;width:24px;height:24px;color:#6b7280;background:#fff;flex-shrink:0;">&times;</button></div>`;
           }).join("") + `</div>`;
         }
       }
@@ -3386,6 +3391,9 @@ function render() {
     card.innerHTML = inner;
     const rmBtn = card.querySelector('.rm:not([data-action="close"])');
     if (rmBtn) rmBtn.onclick = (e) => { e.stopPropagation(); removeTicker(sym); };
+    card.querySelectorAll(".dismissLeaderBtn").forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); dismissLeader(btn.dataset.symbol, btn.dataset.name); };
+    });
     card.querySelectorAll(".dp").forEach(btn => {
       btn.onclick = (e) => { e.stopPropagation(); moveTicker(sym, btn.dataset.dir); };
     });
@@ -3400,8 +3408,6 @@ function render() {
       if (recallsBtn) recallsBtn.onclick = (e) => { e.stopPropagation(); toggleRecalls(); };
       const magBtn = card.querySelector('[data-action="magazine"]');
       if (magBtn) magBtn.onclick = (e) => { e.stopPropagation(); toggleMagazine(); };
-      const fnBtn = card.querySelector('[data-action="foodnetwork"]');
-      if (fnBtn) fnBtn.onclick = (e) => { e.stopPropagation(); toggleFoodNetwork(); };
       const secBtn = card.querySelector('[data-action="secfilings"]');
       if (secBtn) secBtn.onclick = (e) => { e.stopPropagation(); toggleSecFilings(); };
       const insiderBtn = card.querySelector('[data-action="insider"]');
@@ -3618,6 +3624,10 @@ function boot() {
   render();
   startPolling();
   refreshBlockColors();
+  // leadership rarely changes, wikidata has no rate limit to worry about here, so this
+  // loads once on boot and then sits cached for a month rather than waiting on someone
+  // to tap into a ticker's leadership panel before ever fetching anything.
+  fetchLeadershipBatch(tickers);
 }
 
 if (keys.length > 0) {
